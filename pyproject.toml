@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anemoi-cascade"
+version = "0.0.1"
+description = ""
+authors = [
+  { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
+]
+license = { text = "Apache License Version 2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "anemoi-inference",
+    "cascade-python"
+]
+
+[project.optional-dependencies]
+tests = ["pytest"]
+
+[tool.setuptools]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.isort]
+profile = "black"
+

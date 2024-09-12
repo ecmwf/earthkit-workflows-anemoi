@@ -1,0 +1,15 @@
+.env
+.venv
+*.swp
+
+__pycache__
+*.py[co]
+*.egg-info
+
+# pyinstaller build files
+/build
+/dist
+entrypoint.spec
+
+# pytorch
+lightning_logs
