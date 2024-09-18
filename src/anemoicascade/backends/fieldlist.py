@@ -7,9 +7,13 @@ from earthkit.meteo.stats import array as stats
 
 from cascade.backends import num_args
 
-from anemoicascade.wrappers.metadata import StandAloneGribMetadata
-from anemoicascade.wrappers.array_list import ArrayFieldList
+from earthkit.data.sources.array_list import ArrayFieldList
+from earthkit.data.readers.grib.metadata import StandAloneGribMetadata
+from earthkit.data.readers.grib.output import GribCoder
 
+
+# from anemoicascade.wrappers.metadata import StandAloneGribMetadata
+# from anemoicascade.wrappers.array_list import ArrayFieldList
 
 def standardise_output(data):
     # Also, nest the data to avoid problems with not finding geography attribute
@@ -62,6 +66,12 @@ def new_fieldlist(data, metadata: list[StandAloneGribMetadata], overrides: dict)
             print(e)
     return ArrayFieldList(standardise_output(data), metadata)
 
+
+def make_field_list(array, template, **kwargs):
+    """Make a ArrayFieldList from array, template and kwargs using GribCoder.encode"""
+    handle = GribCoder(template = template).encode(None, **kwargs)
+    meta = StandAloneGribMetadata(handle)
+    return ArrayFieldList(array, meta)
 
 class ArrayFieldListBackend:
     def _merge(*fieldlists: list[ArrayFieldList]):
