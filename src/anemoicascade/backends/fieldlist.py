@@ -222,14 +222,31 @@ class ArrayFieldListBackend:
         ret = sum(arrays[1:], arrays[0])
         return ArrayFieldList(ret.values, ret.metadata())
 
-    def take(array: ArrayFieldList, indices: int | tuple, *, axis: int):
-        if axis != 0:
-            raise ValueError("Can not take from FieldList along axis != 0")
-        if isinstance(indices, int):
-            indices = [indices]
-        print(indices)
-        taken = array[indices]
-        return ArrayFieldList(standardise_output(taken.values), taken.metadata())
+    def take(
+        array: ArrayFieldList,
+        indices: int | tuple,
+        *,
+        dim: int | str,
+        method: str = "slice",
+    ):
+        if method == "slice":
+            if dim != 0:
+                raise ValueError("Can not slice from FieldList along dim != 0")
+            if isinstance(indices, int):
+                indices = [indices]
+            ret = array[indices]
+        else:
+            if not isinstance(dim, str):
+                raise ValueError(
+                    "To perform isel/sel on FieldList, dim must be a string"
+                )
+            if method == "isel":
+                ret = array.isel(**{dim: indices})
+            elif method == "sel":
+                ret = array.sel(**{dim: indices})
+            else:
+                raise ValueError(f"Invalid method {method}")
+        return ArrayFieldList(ret.values, ret.metadata())
 
     def norm(
         *arrays: list[ArrayFieldList], metadata: Metadata = None
