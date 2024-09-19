@@ -97,17 +97,17 @@ class MarsInput(RequestBasedInput):
     def pl_load_source(self, **kwargs):
         kwargs["levtype"] = "pl"
         logging.debug("load source mars %s", kwargs)
-        return ekd.from_source("mars", kwargs)
+        return ekd.from_source("mars", kwargs, log = None)
 
     def sfc_load_source(self, **kwargs):
         kwargs["levtype"] = "sfc"
         logging.debug("load source mars %s", kwargs)
-        return ekd.from_source("mars", kwargs)
+        return ekd.from_source("mars", kwargs, log = None)
 
     def ml_load_source(self, **kwargs):
         kwargs["levtype"] = "ml"
         logging.debug("load source mars %s", kwargs)
-        return ekd.from_source("mars", kwargs)
+        return ekd.from_source("mars", kwargs, log = None)
 
 class FileInput(RequestBasedInput):
     WHERE = "file"
