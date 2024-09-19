@@ -483,8 +483,7 @@ class ArrayFieldListBackend:
     #         return ret
 
     def set_metadata(data: ArrayFieldList, metadata: dict) -> ArrayFieldList:
-        return data
-        print("Setting metadata", metadata)
+
         return new_fieldlist(data.values, data.metadata(), metadata)
 
     # def write(data: ArrayFieldList, loc, metadata: dict | None = None):
