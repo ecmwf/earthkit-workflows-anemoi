@@ -152,7 +152,7 @@ def _expand(source: fluent.Action, coords: dict, order: list[str] | None = None)
 
     for key, value in coords.items():
         dataarray = (key, value)
-        source = source.expand(dim=dataarray, internal_dim=dataarray, backend_kwargs=dict(method="sel"))
+        source = source.expand(dim=dataarray, internal_dim=dataarray, backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"}))
     return source
 
 
