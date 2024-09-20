@@ -1,13 +1,9 @@
 from collections import OrderedDict
-import io
 import numpy as np
-import xarray as xr
-import functools
 import datetime as dt
-from typing import Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from cascade import fluent
-from cascade import backends
 
 import earthkit.data as ekd
 import tqdm
@@ -30,6 +26,25 @@ def _retrieve_initial_conditions(
     start_date: str,
     ensemble_number: int | None = None,
 ) -> ekd.sources.array_list.ArrayFieldList:
+    """
+    Retrieve initial conditions for the model
+
+    Parameters
+    ----------
+    input_type : INPUT_TYPES
+        Source of the initial conditions
+    checkpoint : str
+        Checkpoint of the model to use
+    start_date : str
+        Start date of the initial conditions
+    ensemble_number : int | None, optional
+        Id number of the ensemble, by default None
+
+    Returns
+    -------
+    ekd.sources.array_list.ArrayFieldList
+        Initial conditions for the model for the given ensemble member
+    """
     runner = DefaultRunner(checkpoint)
     # Dates required in strange format
     f: Callable[[dt.datetime], tuple[int, int]] = lambda d: (
@@ -43,8 +58,11 @@ def _retrieve_initial_conditions(
     return input_cls.all_fields
 
 
-def _get_coords(runner: DefaultRunner, target_step: int) -> dict[Literal["param", "step"]]:
-    even_steps = (target_step // runner.checkpoint.hour_steps) * runner.checkpoint.hour_steps
+def _get_coords(runner: DefaultRunner, lead_time: int) -> dict[Literal["param", "step"]]:
+    """
+    Get coordinates for the model output from the input
+    """
+    even_steps = (lead_time // runner.checkpoint.hour_steps) * runner.checkpoint.hour_steps
     return {
         "param": [
             *runner.checkpoint.prognostic_params,
@@ -54,12 +72,29 @@ def _get_coords(runner: DefaultRunner, target_step: int) -> dict[Literal["param"
     }
 
 
-def _run_model(initial_conditions, ckpt, target_step: int, **kwargs):
+def _run_model(initial_conditions, ckpt, lead_time: int, device: str | None = None, **kwargs):
+    """
+    Underlying function to run the model
+
+    Parameters
+    ----------
+    initial_conditions :
+        Initial conditions for the model
+    ckpt :
+        Checkpoint pointing to the model to load
+    lead_time : int
+        Number of steps to run the model for
+
+    Returns
+    -------
+    ekd.sources.array_list.ArrayFieldList:
+        Prediction from the model combined into one field list
+    """    
     runner = DefaultRunner(ckpt)
-    coords = _get_coords(runner, target_step)
+    coords = _get_coords(runner, lead_time)
     hour_steps = runner.checkpoint.hour_steps
 
-    payloads = np.empty((len(coords["param"]), target_step // hour_steps), dtype=object)
+    payloads = np.empty((len(coords["param"]), lead_time // hour_steps), dtype=object)
 
     def output_callback(*args, **kwargs):
         if "step" in kwargs or "endStep" in kwargs:
@@ -78,15 +113,20 @@ def _run_model(initial_conditions, ckpt, target_step: int, **kwargs):
             step = kwargs.get("step") if "step" in kwargs else kwargs.get("endStep")
             value = make_field_list(data, template, **kwargs)
             payloads[coords["param"].index(lookup), (step // hour_steps) - 1] = value
+    
+    run_dict = dict(
+        device=device or "cuda",
+        autocast="16",
+        progress_callback=tqdm.tqdm,
+    )
+    run_dict.update(kwargs)
 
     runner.run(
         input_fields=initial_conditions,
-        lead_time=target_step,
+        lead_time=lead_time,
         start_datetime=None,  # will be inferred from the input fields
-        device="cuda",
         output_callback=output_callback,
-        autocast="16",
-        progress_callback=tqdm.tqdm,
+        **run_dict
     )
 
     complete_data: ekd.sources.array_list.ArrayFieldList = None
@@ -119,26 +159,71 @@ def _expand(source: fluent.Action, coords: dict, order: list[str] | None = None)
 def from_model(
     ckpt,
     start_date: str,
-    target_step: int,
+    lead_time: int,
     *,
     num_ensembles: int = 1,
     input_type: INPUT_TYPES = "mars",
-    action: fluent.Action = fluent.Action,
+    action: type[fluent.Action] = fluent.Action,
+    devices: list[str] | str | None = None,
+    input_kwargs: dict[str, Any] = None,
+    **kwargs,
 ) -> fluent.Action:
+    """
+    Create a Cascade Graph from a model prediction
+    
+    Will be automatically expanded to the correct dimensions
+    of param, step and ensemble.
+
+    Parameters
+    ----------
+    ckpt :
+        Location of ckpt to load
+    start_date : str
+        Start date of prediction, used to get initial conditions
+    lead_time : int
+        Hours to predict out to
+    num_ensembles : int, optional
+        Number of ensembles to create, by default 1
+    input_type : INPUT_TYPES, optional
+        Source of input data, by default "mars"
+    action : type[fluent.Action], optional
+        Cascade action to use, by default fluent.Action
+    devices : list[str] | str | None, optional
+        Device assignment of ensemble members, must have length == num_ensembles, by default None
+    input_kwargs : dict[str, Any], optional
+        Kwargs to pass to initial condition retrieval, by default None
+
+    Returns
+    -------
+    fluent.Action
+        Cascade Action of the model prediction
+    """    
+    if devices is not None:
+        if isinstance(devices, str):
+            devices = [devices] * num_ensembles
+        assert len(devices) == num_ensembles, "Number of devices should match the number of ensembles"
+
     source = fluent.from_source(
         [
             fluent.Payload(
                 _retrieve_initial_conditions,
                 (input_type, ckpt, start_date, ensemble_number),
+                kwargs=input_kwargs or {},
             )
             for ensemble_number in range(num_ensembles)
         ],
         coords={"ensemble_member": range(num_ensembles)},
         action=action,
     )
+    models = []
+    for ensemble_number in range(num_ensembles):
+        model = fluent.Payload(
+            _run_model,
+            kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices[ensemble_number] if devices is not None else 'None', **kwargs),
+        )
+        models.append(model)
 
-    prediction = source.map(
-        [fluent.Payload(_run_model, kwargs = dict(ckpt = ckpt, target_step = target_step)) for _ in range(num_ensembles)],
-    )
+    prediction = source.map(models)
 
-    return _expand(prediction, _get_coords(DefaultRunner(ckpt), target_step))
+    return _expand(prediction, _get_coords(DefaultRunner(ckpt), lead_time))
+
