@@ -229,6 +229,7 @@ class ArrayFieldListBackend:
         *,
         dim: int | str,
         method: str = "slice",
+        **kwargs,
     ):
         if method == "slice":
             if dim != 0:
@@ -242,11 +243,12 @@ class ArrayFieldListBackend:
                     "To perform isel/sel on FieldList, dim must be a string"
                 )
             if method == "isel":
-                ret = array.isel(**{dim: indices})
+                ret = array.isel(**{dim: indices}, **kwargs)
             elif method == "sel":
-                ret = array.sel(**{dim: indices})
+                ret = array.sel(**{dim: indices}, **kwargs)
             else:
                 raise ValueError(f"Invalid method {method}")
+        
         return ArrayFieldList(ret.values, ret.metadata())
 
     def norm(
