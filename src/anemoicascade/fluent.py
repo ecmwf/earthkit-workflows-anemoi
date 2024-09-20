@@ -143,19 +143,18 @@ def _run_model(initial_conditions, ckpt, lead_time: int, **kwargs):
     return complete_data
 
 
-def _expand(source: fluent.Action, coords: dict, order: list[str] | None = None):
+def _expand(source: fluent.Action, coords: dict[Literal["param", "step"]]):
     """Expand action upon coordinates"""
-    if order is not None:
-        ordered_dict = OrderedDict()
-        for key in order:
-            ordered_dict[key] = coords[key]
-        return _expand(source, ordered_dict)
 
-    for key, value in coords.items():
-        dataarray = (key, value)
-        source = source.expand(dim=dataarray, internal_dim=dataarray, backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"}))
-    return source
+    source = source.expand(('step', coords['step']), ('step', coords['step']), backend_kwargs=dict(method="sel"))
 
+    surface_vars = [var  for var in coords["param"] if "_" not in var]
+    pressure_vars = [var for var in coords["param"] if "_" in var]
+
+    surface_expansion = source.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
+    pressure_vars = source.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"}))
+    
+    return surface_expansion.join(pressure_vars, dim = 'param')
 
 def from_model(
     ckpt,
@@ -220,7 +219,7 @@ def from_model(
     for ensemble_number in range(num_ensembles):
         model = fluent.Payload(
             _run_model,
-            kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices[ensemble_number] if devices is not None else 'None', **kwargs),
+            kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices[ensemble_number] if devices is not None else None, **kwargs),
         )
         models.append(model)
 
@@ -228,3 +227,47 @@ def from_model(
 
     return _expand(prediction, _get_coords(DefaultRunner(ckpt), lead_time))
 
+def with_initial_conditions(
+    initial_conditions,
+    ckpt,
+    lead_time: int,
+    *,
+    action: type[fluent.Action] = None,
+    devices: list[str] | str | None = None,
+    **kwargs,
+    ):
+    """
+    _summary_
+
+    Parameters
+    ----------
+    initial_conditions : _type_
+        _description_
+    ckpt : _type_
+        _description_
+    lead_time : int
+        _description_
+    action : type[fluent.Action], optional
+        _description_, by default None
+    devices : list[str] | str | None, optional
+        _description_, by default None
+
+    Returns
+    -------
+    _type_
+        _description_
+    """    
+    if isinstance(initial_conditions, fluent.Action):
+        initial_conditions = initial_conditions.switch(action or fluent.Action)
+    elif isinstance(initial_conditions, (Callable, fluent.Payload)):
+        initial_conditions = fluent.from_source([initial_conditions], action=action or fluent.Action)
+    else:
+        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)], action=action or fluent.Action)
+
+    models = fluent.Payload(
+        _run_model,
+        kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices, **kwargs),
+    )
+    prediction = initial_conditions.map(models)
+    return _expand(prediction, _get_coords(DefaultRunner(ckpt), lead_time))
+     
