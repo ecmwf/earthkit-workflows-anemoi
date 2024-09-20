@@ -72,7 +72,7 @@ def _get_coords(runner: DefaultRunner, lead_time: int) -> dict[Literal["param", 
     }
 
 
-def _run_model(initial_conditions, ckpt, lead_time: int, device: str | None = None, **kwargs):
+def _run_model(initial_conditions, ckpt, lead_time: int, **kwargs):
     """
     Underlying function to run the model
 
@@ -114,6 +114,7 @@ def _run_model(initial_conditions, ckpt, lead_time: int, device: str | None = No
             value = make_field_list(data, template, **kwargs)
             payloads[coords["param"].index(lookup), (step // hour_steps) - 1] = value
     
+    device = kwargs.pop('device', None)
     run_dict = dict(
         device=device or "cuda",
         autocast="16",
