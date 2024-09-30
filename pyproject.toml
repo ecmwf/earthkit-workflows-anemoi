@@ -1,20 +1,29 @@
+# (C) Copyright 2024 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
 name = "anemoi-cascade"
-version = "0.0.1"
-description = ""
+description = "A Cascade interface to anemoi inference"
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
 license = { text = "Apache License Version 2.0" }
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "anemoi-inference",
-    "cascade-python"
+    "cascade-python @ git+ssh://git@github.com/ecmwf/cascade.git",
 ]
+dynamic = [ "version" ]
 
 [project.optional-dependencies]
 tests = ["pytest"]
@@ -22,6 +31,9 @@ tests = ["pytest"]
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
+
+[tool.setuptools_scm]
+version_file = "src/anemoicascade/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]

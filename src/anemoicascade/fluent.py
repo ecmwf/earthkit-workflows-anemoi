@@ -1,146 +1,16 @@
-from collections import OrderedDict
-import numpy as np
-import datetime as dt
-from typing import Any, Callable, Literal, Optional
+
+import functools
+from typing import Any, Callable, Literal
 
 from cascade import fluent
 
-import earthkit.data as ekd
-import tqdm
 
-from anemoi.inference.runner import Runner, DefaultRunner
-from anemoicascade.anemoi_runners import MarsInput, FileInput, RequestBasedInput
-from anemoicascade.backends.fieldlist import make_field_list
+from anemoi.inference.checkpoint import Checkpoint
+from anemoi.inference.runner import DefaultRunner
 
-INPUT_TYPES = Literal["mars", "file"]
-INPUTS: dict[str, RequestBasedInput] = {
-    "mars": MarsInput,
-    "file": FileInput,
-}
-
-
-
-def _retrieve_initial_conditions(
-    input_type: INPUT_TYPES,
-    checkpoint: str,
-    start_date: str,
-    ensemble_number: int | None = None,
-) -> ekd.sources.array_list.ArrayFieldList:
-    """
-    Retrieve initial conditions for the model
-
-    Parameters
-    ----------
-    input_type : INPUT_TYPES
-        Source of the initial conditions
-    checkpoint : str
-        Checkpoint of the model to use
-    start_date : str
-        Start date of the initial conditions
-    ensemble_number : int | None, optional
-        Id number of the ensemble, by default None
-
-    Returns
-    -------
-    ekd.sources.array_list.ArrayFieldList
-        Initial conditions for the model for the given ensemble member
-    """
-    runner = DefaultRunner(checkpoint)
-    # Dates required in strange format
-    f: Callable[[dt.datetime], tuple[int, int]] = lambda d: (
-        int(d.strftime("%Y%m%d")),
-        d.hour,
-    )
-    start_date = dt.datetime.strptime(start_date, "%Y-%m-%dT%H:%M")
-
-    dates = [start_date + dt.timedelta(hours=x) for x in runner.lagged]
-    input_cls = INPUTS[input_type](runner.checkpoint, list(map(f, dates)))
-    return input_cls.all_fields
-
-
-def _get_coords(runner: DefaultRunner, lead_time: int) -> dict[Literal["param", "step"]]:
-    """
-    Get coordinates for the model output from the input
-    """
-    even_steps = (lead_time // runner.checkpoint.hour_steps) * runner.checkpoint.hour_steps
-    return {
-        "param": [
-            *runner.checkpoint.prognostic_params,
-            *runner.checkpoint.diagnostic_params,
-        ],
-        "step": [x + runner.checkpoint.hour_steps for x in range(0, even_steps, runner.checkpoint.hour_steps)],
-    }
-
-
-def _run_model(initial_conditions, ckpt, lead_time: int, **kwargs):
-    """
-    Underlying function to run the model
-
-    Parameters
-    ----------
-    initial_conditions :
-        Initial conditions for the model
-    ckpt :
-        Checkpoint pointing to the model to load
-    lead_time : int
-        Number of steps to run the model for
-
-    Returns
-    -------
-    ekd.sources.array_list.ArrayFieldList:
-        Prediction from the model combined into one field list
-    """    
-    runner = DefaultRunner(ckpt)
-    coords = _get_coords(runner, lead_time)
-    hour_steps = runner.checkpoint.hour_steps
-
-    payloads = np.empty((len(coords["param"]), lead_time // hour_steps), dtype=object)
-
-    def output_callback(*args, **kwargs):
-        if "step" in kwargs or "endStep" in kwargs:
-            data = args[0]
-            template = kwargs.pop("template")
-
-            param = kwargs.get("param", template._metadata.get("param", ""))
-
-            level = template._metadata.get("levelist", 0)
-            level = level if level else 0  # getting around None
-
-            lookup = f"{param}_{level}" if level > 0 else param
-            if lookup not in coords["param"]:  # Check if given value is expected and ignore otherwise
-                return
-
-            step = kwargs.get("step") if "step" in kwargs else kwargs.get("endStep")
-            value = make_field_list(data, template, **kwargs)
-            payloads[coords["param"].index(lookup), (step // hour_steps) - 1] = value
-    
-    device = kwargs.pop('device', None)
-    run_dict = dict(
-        device=device or "cuda",
-        autocast="16",
-        progress_callback=tqdm.tqdm,
-    )
-    run_dict.update(kwargs)
-
-    runner.run(
-        input_fields=initial_conditions,
-        lead_time=lead_time,
-        start_datetime=None,  # will be inferred from the input fields
-        output_callback=output_callback,
-        **run_dict
-    )
-
-    complete_data: ekd.sources.array_list.ArrayFieldList = None
-    for payload in payloads.flatten():
-        if payload is None:
-            continue
-
-        if complete_data is None:
-            complete_data = payload
-        else:
-            complete_data = complete_data + payload
-
-    return complete_data
+from anemoicascade.inference import run_model, retrieve_initial_conditions, get_coords, INPUT_TYPES
+import numpy as np
+import xarray as xr
 
 
 def _expand(source: fluent.Action, coords: dict[Literal["param", "step"]]):
@@ -148,7 +18,7 @@ def _expand(source: fluent.Action, coords: dict[Literal["param", "step"]]):
 
     source = source.expand(('step', coords['step']), ('step', coords['step']), backend_kwargs=dict(method="sel"))
 
-    surface_vars = [var  for var in coords["param"] if "_" not in var]
+    surface_vars  = [var for var in coords["param"] if "_" not in var]
     pressure_vars = [var for var in coords["param"] if "_" in var]
 
     surface_expansion = source.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
@@ -198,15 +68,18 @@ def from_model(
     fluent.Action
         Cascade Action of the model prediction
     """    
+    Checkpoint(ckpt).validate_environment(on_difference='warn')  # Check if checkpoint is valid
+
     if devices is not None:
         if isinstance(devices, str):
             devices = [devices] * num_ensembles
         assert len(devices) == num_ensembles, "Number of devices should match the number of ensembles"
+    
 
     source = fluent.from_source(
         [
             fluent.Payload(
-                _retrieve_initial_conditions,
+                retrieve_initial_conditions,
                 (input_type, ckpt, start_date, ensemble_number),
                 kwargs=input_kwargs or {},
             )
@@ -218,18 +91,18 @@ def from_model(
     models = []
     for ensemble_number in range(num_ensembles):
         model = fluent.Payload(
-            _run_model,
+            run_model,
             kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices[ensemble_number] if devices is not None else None, **kwargs),
         )
         models.append(model)
 
     prediction = source.map(models)
 
-    return _expand(prediction, _get_coords(DefaultRunner(ckpt), lead_time))
+    return _expand(prediction, get_coords(DefaultRunner(ckpt), lead_time))
 
 def with_initial_conditions(
     initial_conditions,
-    ckpt,
+    ckpt: fluent.Action | fluent.Payload | Callable | Any,
     lead_time: int,
     *,
     action: type[fluent.Action] = None,
@@ -258,16 +131,40 @@ def with_initial_conditions(
         _description_
     """    
     if isinstance(initial_conditions, fluent.Action):
-        initial_conditions = initial_conditions.switch(action or fluent.Action)
+        initial_conditions = initial_conditions
     elif isinstance(initial_conditions, (Callable, fluent.Payload)):
         initial_conditions = fluent.from_source([initial_conditions], action=action or fluent.Action)
     else:
         initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)], action=action or fluent.Action)
 
     models = fluent.Payload(
-        _run_model,
-        kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices, **kwargs),
+        run_model,
+        kwargs=dict(ckpt = ckpt, lead_time = lead_time, devices=devices, **kwargs),
     )
     prediction = initial_conditions.map(models)
-    return _expand(prediction, _get_coords(DefaultRunner(ckpt), lead_time))
+    return _expand(prediction, get_coords(DefaultRunner(ckpt), lead_time))
      
+
+class AnemoiActions(fluent.Action):
+    def infer(self, ckpt: str, lead_time: int, **kwargs) -> fluent.Action:
+        """
+        Map a model prediction to all nodes within 
+        the graph, using them as initial conditions
+
+        Parameters
+        ----------
+        ckpt : str
+            Model checkpoint to load
+        lead_time : int
+            Lead time to predict out to in hours
+
+        Returns
+        -------
+        fluent.Action
+            Expanded action with model predictions
+        """        
+        return with_initial_conditions(self, ckpt, lead_time, **kwargs)
+        
+    
+    
+fluent.register("anemoi", AnemoiActions)
