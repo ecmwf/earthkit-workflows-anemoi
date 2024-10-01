@@ -167,4 +167,4 @@ class AnemoiActions(fluent.Action):
         
     
     
-fluent.register("anemoi", AnemoiActions)
+fluent.Action.register("anemoi", AnemoiActions)
