@@ -164,7 +164,6 @@ class AnemoiActions(fluent.Action):
             Expanded action with model predictions
         """        
         return with_initial_conditions(self, ckpt, lead_time, **kwargs)
-        
-    
+
     
 fluent.Action.register("anemoi", AnemoiActions)

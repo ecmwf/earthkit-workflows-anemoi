@@ -392,7 +392,7 @@ function highlightFilter(filter) {
                   // adding nodes and edges to the graph
                   data = {nodes: nodes, edges: edges};
 
-                  var options = {};
+                  var options = {"layout": {"randomSeed": 42, "improvedLayout": true, "hierarchical": {"enabled": false}}, "physics": {"forceAtlas2Based": {"gravitationalConstant": -28, "springLength": 100}, "minVelocity": 0.75, "solver": "forceAtlas2Based", "timestep": 0.25}};
 
                   
 
