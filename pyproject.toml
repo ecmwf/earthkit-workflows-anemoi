@@ -20,8 +20,9 @@ authors = [
 license = { text = "Apache License Version 2.0" }
 requires-python = ">=3.9"
 dependencies = [
-    "anemoi-inference>=0.3.0",
+    "anemoi-inference>0.3.0",
     "cascade-python @ git+https://github.com/ecmwf/cascade.git",
+    "earthkit-data @ git+https://github.com/ecmwf/earthkit-data.git",
 ]
 dynamic = [ "version" ]
 

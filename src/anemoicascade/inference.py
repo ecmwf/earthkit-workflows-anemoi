@@ -1,142 +1,82 @@
-import numpy as np
-import datetime as dt
-from typing import Any, Callable, Literal
+from __future__ import annotations
 
+from datetime import datetime
+from typing import Any, Generator, TYPE_CHECKING
 
-import earthkit.data as ekd
-import tqdm
+from earthkit.data import FieldList, SimpleFieldList, ArrayField
 
-from anemoi.inference.checkpoint import Checkpoint
-from anemoi.inference.runner import Runner, DefaultRunner
-from anemoicascade.anemoi_runners import MarsInput, FileInput, RequestBasedInput
-from anemoicascade.backends.fieldlist import make_field_list
+from anemoi.utils.dates import frequency_to_seconds
 
-INPUT_TYPES = Literal["mars", "file"]
-INPUTS: dict[str, RequestBasedInput] = {
-    "mars": MarsInput,
-    "file": FileInput,
-}
+if TYPE_CHECKING:
+    from anemoi.inference.runner import Runner
 
-
-
-def retrieve_initial_conditions(
-    input_type: INPUT_TYPES,
-    checkpoint: str,
-    start_date: str,
-    ensemble_number: int | None = None,
-) -> ekd.sources.array_list.ArrayFieldList:
+def run(input_state: dict, runner: Runner, lead_time: int) -> Generator[Any, None, None]:
     """
-    Retrieve initial conditions for the model
+    Run the model
 
     Parameters
     ----------
-    input_type : INPUT_TYPES
-        Source of the initial conditions
-    checkpoint : str
-        Checkpoint of the model to use
-    start_date : str
-        Start date of the initial conditions
-    ensemble_number : int | None, optional
-        Id number of the ensemble, by default None
-
-    Returns
-    -------
-    ekd.sources.array_list.ArrayFieldList
-        Initial conditions for the model for the given ensemble member
-    """
-    runner = DefaultRunner(checkpoint)
-    # Dates required in strange format
-    f: Callable[[dt.datetime], tuple[int, int]] = lambda d: (
-        int(d.strftime("%Y%m%d")),
-        d.hour,
-    )
-    start_date = dt.datetime.strptime(start_date, "%Y-%m-%dT%H:%M")
-
-    dates = [start_date + dt.timedelta(hours=x) for x in runner.lagged]
-    input_cls = INPUTS[input_type](runner.checkpoint, list(map(f, dates)))
-    return input_cls.all_fields
-
-
-def get_coords(runner: DefaultRunner, lead_time: int) -> dict[Literal["param", "step"]]:
-    """
-    Get coordinates for the model output from the input
-    """
-    even_steps = (lead_time // runner.checkpoint.hour_steps) * runner.checkpoint.hour_steps
-    return {
-        "param": [
-            *runner.checkpoint.prognostic_params,
-            *runner.checkpoint.diagnostic_params,
-        ],
-        "step": [x + runner.checkpoint.hour_steps for x in range(0, even_steps, runner.checkpoint.hour_steps)],
-    }
-
-
-def run_model(initial_conditions, ckpt, lead_time: int, **kwargs):
-    """
-    Underlying function to run the model
-
-    Parameters
-    ----------
-    initial_conditions :
+    runner : Runner
+        Runner object
+    input_state : dict
         Initial conditions for the model
-    ckpt :
-        Checkpoint pointing to the model to load
     lead_time : int
-        Number of steps to run the model for
+        Lead time for the model
+
+    Yields
+    ------
+    Generator[SimpleFieldList, None, None]
+        State of the model at each time step
+    """
+    yield from runner.run(input_state=input_state, lead_time=lead_time)
+
+def run_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> Generator[SimpleFieldList, None, None]:
+    """
+    Run the model and yield the results as earthkit FieldList
+
+    Parameters
+    ----------
+    runner : Runner
+        Runner Object
+    input_state : dict
+        Initial Conditions for the model
+    lead_time : int
+        Lead time for the model
+
+    Yields
+    ------
+    Generator[SimpleFieldList, None, None]
+        State of the model at each time step
+    """    
+    initial_date: datetime = input_state['date']
+    for state in run(input_state, runner, lead_time):
+        fields = []
+        step = frequency_to_seconds(state['date'] - initial_date) // 3600
+        
+        for field in state['fields']:
+            fields.append(ArrayField(state['fields'][field], {'param': field, 'step': step, 'base_datetime': initial_date}))
+
+        yield FieldList.from_fields(fields)
+
+def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> SimpleFieldList:
+    """
+    Collect the results of the model run as earthkit FieldList
+
+    Parameters
+    ----------
+    runner : Runner
+        Runner object
+    input_state : dict
+        Initial conditions for the model
+    lead_time : int
+        Lead time for the model
 
     Returns
     -------
-    ekd.sources.array_list.ArrayFieldList:
-        Prediction from the model combined into one field list
-    """    
-    runner = DefaultRunner(ckpt, verbose=False)
-    coords = _get_coords(runner, lead_time)
-    hour_steps = runner.checkpoint.hour_steps
-
-    payloads = np.empty((len(coords["param"]), lead_time // hour_steps), dtype=object)
-
-    def output_callback(*args, **kwargs):
-        if "step" in kwargs or "endStep" in kwargs:
-            data = args[0]
-            template = kwargs.pop("template")
-
-            param = kwargs.get("param", template._metadata.get("param", ""))
-
-            level = template._metadata.get("levelist", 0)
-            level = level if level else 0  # getting around None
-
-            lookup = f"{param}_{level}" if level > 0 else param
-            if lookup not in coords["param"]:  # Check if given value is expected and ignore otherwise
-                return
-
-            step = kwargs.get("step") if "step" in kwargs else kwargs.get("endStep")
-            value = make_field_list(data, template, **kwargs)
-            payloads[coords["param"].index(lookup), (step // hour_steps) - 1] = value
-    
-    device = kwargs.pop('device', None)
-    run_dict = dict(
-        device=device or "cuda",
-        autocast="16",
-        progress_callback=tqdm.tqdm,
-    )
-    run_dict.update(kwargs)
-
-    runner.run(
-        input_fields=initial_conditions,
-        lead_time=lead_time,
-        start_datetime=None,  # will be inferred from the input fields
-        output_callback=output_callback,
-        **run_dict
-    )
-
-    complete_data: ekd.sources.array_list.ArrayFieldList = None
-    for payload in payloads.flatten():
-        if payload is None:
-            continue
-
-        if complete_data is None:
-            complete_data = payload
-        else:
-            complete_data = complete_data + payload
-
-    return complete_data
+    SimpleFieldList
+        Combined FieldList of the model run
+    """
+    fields = []
+    for state in run_as_earthkit(input_state, runner, lead_time):
+        fields.extend(state.fields)
+    return SimpleFieldList(fields)
