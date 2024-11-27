@@ -43,28 +43,30 @@ def resolve_metadata(metadata: Metadata, *args) -> dict:
         return metadata
     return metadata(*args)
 
-
-def new_fieldlist(data, metadata: list[StandAloneGribMetadata], overrides: dict):
+def new_field(data, metadata: StandAloneGribMetadata, overrides: dict):
     if len(overrides) > 0:
         try:
-            new_metadata = [
-                metadata[x].override(overrides) for x in range(len(metadata))
-            ]
-            return SimpleFieldList(
-                standardise_output(data),
-                new_metadata,
-            )
+            new_metadata = metadata.override(overrides)
+            return ArrayField(standardise_output(data), new_metadata)
         except Exception as e:
             print(
                 "Error setting metadata",
                 overrides,
                 "edition",
-                metadata[0]["edition"],
+                metadata["edition"],
                 "param",
-                metadata[0]["paramId"],
+                metadata["paramId"],
             )
             print(e)
-    return SimpleFieldList(standardise_output(data), metadata)
+    return ArrayField(standardise_output(data), metadata)
+
+def new_fieldlist(data, metadata: list[StandAloneGribMetadata], overrides: dict):
+    if not isinstance(data, list):
+        data = [data]
+    if not isinstance(metadata, list):
+        metadata = [metadata]
+    
+    return SimpleFieldList(list(new_field(data[i], metadata[i], overrides) for i in range(len(data))))
 
 
 def make_field_list(array, template, **kwargs):
