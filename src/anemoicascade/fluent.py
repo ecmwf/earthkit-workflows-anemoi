@@ -19,18 +19,29 @@ if TYPE_CHECKING:
 
 LOG = logging.getLogger(__name__)
 
-def _parse_date(data: str | tuple[int, int, int]) -> datetime.datetime:
+def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetime.datetime:
     """Parse date from string or tuple"""
-    if isinstance(data, str):
-        return datetime.datetime.fromisoformat(data)
+    if isinstance(date, datetime.datetime):
+        return date
+    elif isinstance(date, str):
+        return datetime.datetime.fromisoformat(date)
     else:
-        return datetime.datetime(*data)
+        return datetime.datetime(*date)
 
-def get_initial_conditions(input: Input, date: str | tuple[int, int, int], **_) -> Any:
+def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date = _parse_date(date))
-    input_state.pop('_grib_templates_for_output', None)
+    # input_state.pop('_grib_templates_for_output', None)
     return input_state
+
+def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1) -> fluent.Action:
+    init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
+    return fluent.from_source(
+        [
+            [init_condition for _ in range(ensemble_members)],
+        ],
+        coords = {'date': [date], "member": range(ensemble_members)},
+    )
 
 def _time_range(start, end, step):
     """Get a range of timedeltas"""
@@ -38,18 +49,32 @@ def _time_range(start, end, step):
         yield start
         start += step
 
-def _expand(runner: Runner, model_results: fluent.Action, lead_time: datetime.timedelta) -> fluent.Action:
+def _expand(runner: Runner, model_results: fluent.Action, lead_time: datetime.timedelta, remap: bool = False) -> fluent.Action:
     """Expand model results to the correct dimensions"""
     model_step = runner.checkpoint.timestep
     steps = list(map(lambda x: frequency_to_seconds(x) // 3600, _time_range(model_step, lead_time + model_step, model_step)))
 
+    # Expand by time
+    model_results_by_time: fluent.Action = model_results.expand(('step', steps), ('step', steps), backend_kwargs=dict(method="sel"))
+
+    # Expand by variable
     variables = [*runner.checkpoint.diagnostic_variables, *runner.checkpoint.prognostic_variables]
 
-    model_results_by_time: fluent.Action = model_results.expand(('step', steps), ('step', steps), backend_kwargs=dict(method="sel"))
-    model_results_by_variable: fluent.Action = model_results_by_time.expand(('param', variables), ('param', variables), backend_kwargs=dict(method="sel"))
-    return model_results_by_variable
+    # Seperate surface and pressure variables
+    surface_vars  = [var for var in variables if "_" not in var]
+    # pressure_vars = [var for var in variables if "_" in var]
+    pressure_vars = list(set(var.split('_')[0] for var in variables if "_" in var))
 
-def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time, **kwargs) -> fluent.Action:
+    surface_expansion = model_results_by_time.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
+    # pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}" if remap else None}))
+    pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel"))
+
+    return surface_expansion.join(pressure_vars, dim = 'param')
+
+    # model_results_by_variable: fluent.Action = model_results_by_time.expand(('param', variables), ('param', variables), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"} if remap else None))
+    # return model_results_by_variable
+
+def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
     """
     Run the model, expanding the results to the correct dimensions
 
@@ -59,8 +84,9 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time, **k
         `anemoi.inference` runner
     input_state_source : fluent.Action
         Fluent action of initial conditions
-    lead_time : _type_
-        Lead time to run out to
+    lead_time : Any
+        Lead time to run out to. Can be a string, 
+        i.e. `1H`, `1D`, int, or a datetime.timedelta
 
     Returns
     -------
@@ -71,12 +97,16 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time, **k
 
     model_payload = fluent.Payload(collect_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
     model_results = input_state_source.map(model_payload)
+    return model_results
+    
     return _expand(runner, model_results, lead_time)
 
 def from_config(
     config: os.PathLike,
     overrides: dict[str, Any] = None,
+    *,
     date: str | tuple[int, int, int] = None,
+    ensemble_members: int = 1,
     **kwargs,
 ) -> fluent.Action: 
     """
@@ -90,7 +120,8 @@ def from_config(
         Override for the config, by default None
     date : str | tuple[int, int, int], optional
         Specific override for date, by default None
-
+    ensemble_members : int, optional
+        Number of ensemble members to run, by default 1
     Returns
     -------
     fluent.Action
@@ -115,14 +146,8 @@ def from_config(
 
     input = runner.create_input()
 
-    input_state_source = fluent.from_source(
-        [
-            fluent.Payload(get_initial_conditions, kwargs=dict(input = input, date = date or config.date)),
-            # for ensemble_number in range(num_ensembles)
-        ],
-        # coords={"ensemble_member": range(num_ensembles)},
-        # action=action,
-    )
+    input_state_source = get_initial_conditions_source(input = input, date = date or config.date, ensemble_members = ensemble_members)
+
     return _run_model(runner, input_state_source, config.lead_time)
 
 
@@ -131,6 +156,8 @@ def from_input(
     input: str | dict[str, Any],
     date: str | tuple[int, int, int],
     lead_time: Any,
+    *,
+    ensemble_members: int = 1,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -148,11 +175,18 @@ def from_input(
     lead_time : Any
         Lead time to run out to. Can be a string, 
         i.e. `1H`, `1D`, int, or a datetime.timedelta
+    ensemble_members : int, optional
+        Number of ensemble members to run, by default 1
 
     Returns
     -------
     fluent.Action
         Cascade action of the model results
+
+    Examples
+    -------
+    >>> from anemoicascade import from_input
+    >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """    
     from anemoi.inference.runners.default import DefaultRunner
     from anemoi.inference.inputs import create_input
@@ -165,14 +199,8 @@ def from_input(
 
     input = create_input(runner, input)
 
-    input_state_source = fluent.from_source(
-        [
-            fluent.Payload(get_initial_conditions, kwargs=dict(input = input, date = date)),
-            # for ensemble_number in range(num_ensembles)
-        ],
-        # coords={"ensemble_member": range(num_ensembles)},
-        # action=action,
-    )
+    input_state_source = get_initial_conditions_source(input = input, date = date, ensemble_members = ensemble_members)
+
     return _run_model(runner, input_state_source, lead_time)
 
 def from_initial_conditions(
@@ -199,6 +227,11 @@ def from_initial_conditions(
     -------
     fluent.Action
         Cascade action of the model results
+
+    Examples
+    --------
+    >>> from anemoicascade import from_initial_conditions
+    >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
     from anemoi.inference.runners.simple import SimpleRunner
     runner = SimpleRunner(ckpt, **kwargs)

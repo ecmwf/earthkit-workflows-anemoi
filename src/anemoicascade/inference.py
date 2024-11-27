@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any, Generator, TYPE_CHECKING
 
 from earthkit.data import FieldList, SimpleFieldList, ArrayField
+from earthkit.data.utils.metadata.dict import UserMetadata
+from earthkit.data.utils.dates import time_to_grib, date_to_grib
 
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -30,7 +32,7 @@ def run(input_state: dict, runner: Runner, lead_time: int) -> Generator[Any, Non
     """
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
-def run_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> Generator[SimpleFieldList, None, None]:
+def run_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> Generator[SimpleFieldList, None, None]:
     """
     Run the model and yield the results as earthkit FieldList
 
@@ -40,7 +42,7 @@ def run_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> Genera
         Runner Object
     input_state : dict
         Initial Conditions for the model
-    lead_time : int
+    lead_time : Any
         Lead time for the model
 
     Yields
@@ -49,16 +51,27 @@ def run_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> Genera
         State of the model at each time step
     """    
     initial_date: datetime = input_state['date']
+
     for state in run(input_state, runner, lead_time):
         fields = []
         step = frequency_to_seconds(state['date'] - initial_date) // 3600
         
         for field in state['fields']:
-            fields.append(ArrayField(state['fields'][field], {'param': field, 'step': step, 'base_datetime': initial_date}))
+            array = state['fields'][field]
+            if '_grib_templates_for_output' in state and field in state['_grib_templates_for_output']:
+                metadata = state['_grib_templates_for_output'][field].metadata()
+                metadata = metadata.override({'step': step}, headers_only_clone = False) # 'date': time_to_grib(initial_date), 'time': time_to_grib(initial_date)
+
+            else:
+                metadata = UserMetadata(
+                    {'shortName': field, 'step': step, 'base_datetime': initial_date, "latitudes": runner.checkpoint.latitudes, "longitudes": runner.checkpoint.longitudes}, 
+                    array
+                )
+            fields.append(ArrayField(array, metadata))
 
         yield FieldList.from_fields(fields)
 
-def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> SimpleFieldList:
+def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
 
@@ -68,7 +81,7 @@ def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: int) -> Si
         Runner object
     input_state : dict
         Initial conditions for the model
-    lead_time : int
+    lead_time : Any
         Lead time for the model
 
     Returns
