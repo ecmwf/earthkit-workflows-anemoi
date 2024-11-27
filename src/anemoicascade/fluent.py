@@ -1,170 +1,273 @@
+from __future__ import annotations
 
-import functools
-from typing import Any, Callable, Literal
+import os
+from typing import Any, Callable, TYPE_CHECKING
+import datetime
 
 from cascade import fluent
 
+import logging
 
-from anemoi.inference.checkpoint import Checkpoint
-from anemoi.inference.runner import DefaultRunner
-
-from anemoicascade.inference import run_model, retrieve_initial_conditions, get_coords, INPUT_TYPES
-import numpy as np
-import xarray as xr
+from anemoicascade.inference import run_as_earthkit, collect_as_earthkit
+from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
+from anemoi.utils.dates import frequency_to_seconds
 
 
-def _expand(source: fluent.Action, coords: dict[Literal["param", "step"]]):
-    """Expand action upon coordinates"""
+if TYPE_CHECKING:
+    from anemoi.inference.input import Input
+    from anemoi.inference.runner import Runner
 
-    source = source.expand(('step', coords['step']), ('step', coords['step']), backend_kwargs=dict(method="sel"))
+LOG = logging.getLogger(__name__)
 
-    surface_vars  = [var for var in coords["param"] if "_" not in var]
-    pressure_vars = [var for var in coords["param"] if "_" in var]
+def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetime.datetime:
+    """Parse date from string or tuple"""
+    if isinstance(date, datetime.datetime):
+        return date
+    elif isinstance(date, str):
+        return datetime.datetime.fromisoformat(date)
+    else:
+        return datetime.datetime(*date)
 
-    surface_expansion = source.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
-    pressure_vars = source.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"}))
-    
+def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
+    """Get initial conditions for the model"""
+    input_state = input.create_input_state(date = _parse_date(date))
+    # input_state.pop('_grib_templates_for_output', None)
+    return input_state
+
+def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1) -> fluent.Action:
+    init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
+    return fluent.from_source(
+        [
+            [init_condition for _ in range(ensemble_members)],
+        ],
+        coords = {'date': [date], "member": range(ensemble_members)},
+    )
+
+def _time_range(start, end, step):
+    """Get a range of timedeltas"""
+    while start < end:
+        yield start
+        start += step
+
+def _expand(runner: Runner, model_results: fluent.Action, lead_time: datetime.timedelta, remap: bool = False) -> fluent.Action:
+    """Expand model results to the correct dimensions"""
+    model_step = runner.checkpoint.timestep
+    steps = list(map(lambda x: frequency_to_seconds(x) // 3600, _time_range(model_step, lead_time + model_step, model_step)))
+
+    # Expand by time
+    model_results_by_time: fluent.Action = model_results.expand(('step', steps), ('step', steps), backend_kwargs=dict(method="sel"))
+
+    # Expand by variable
+    variables = [*runner.checkpoint.diagnostic_variables, *runner.checkpoint.prognostic_variables]
+
+    # Seperate surface and pressure variables
+    surface_vars  = [var for var in variables if "_" not in var]
+    # pressure_vars = [var for var in variables if "_" in var]
+    pressure_vars = list(set(var.split('_')[0] for var in variables if "_" in var))
+
+    surface_expansion = model_results_by_time.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
+    # pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}" if remap else None}))
+    pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel"))
+
     return surface_expansion.join(pressure_vars, dim = 'param')
 
-def from_model(
-    ckpt,
-    start_date: str,
-    lead_time: int,
-    *,
-    num_ensembles: int = 1,
-    input_type: INPUT_TYPES = "mars",
-    action: type[fluent.Action] = fluent.Action,
-    devices: list[str] | str | None = None,
-    input_kwargs: dict[str, Any] = None,
-    **kwargs,
-) -> fluent.Action:
+    # model_results_by_variable: fluent.Action = model_results_by_time.expand(('param', variables), ('param', variables), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"} if remap else None))
+    # return model_results_by_variable
+
+def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
     """
-    Create a Cascade Graph from a model prediction
-    
-    Will be automatically expanded to the correct dimensions
-    of param, step and ensemble.
+    Run the model, expanding the results to the correct dimensions
 
     Parameters
     ----------
-    ckpt :
-        Location of ckpt to load
-    start_date : str
-        Start date of prediction, used to get initial conditions
-    lead_time : int
-        Hours to predict out to
-    num_ensembles : int, optional
-        Number of ensembles to create, by default 1
-    input_type : INPUT_TYPES, optional
-        Source of input data, by default "mars"
-    action : type[fluent.Action], optional
-        Cascade action to use, by default fluent.Action
-    devices : list[str] | str | None, optional
-        Device assignment of ensemble members, must have length == num_ensembles, by default None
-    input_kwargs : dict[str, Any], optional
-        Kwargs to pass to initial condition retrieval, by default None
+    runner : Runner
+        `anemoi.inference` runner
+    input_state_source : fluent.Action
+        Fluent action of initial conditions
+    lead_time : Any
+        Lead time to run out to. Can be a string, 
+        i.e. `1H`, `1D`, int, or a datetime.timedelta
 
     Returns
     -------
     fluent.Action
-        Cascade Action of the model prediction
-    """    
-    Checkpoint(ckpt).validate_environment(on_difference='warn')  # Check if checkpoint is valid
-
-    if devices is not None:
-        if isinstance(devices, str):
-            devices = [devices] * num_ensembles
-        assert len(devices) == num_ensembles, "Number of devices should match the number of ensembles"
-    
-
-    source = fluent.from_source(
-        [
-            fluent.Payload(
-                retrieve_initial_conditions,
-                (input_type, ckpt, start_date, ensemble_number),
-                kwargs=input_kwargs or {},
-            )
-            for ensemble_number in range(num_ensembles)
-        ],
-        coords={"ensemble_member": range(num_ensembles)},
-        action=action,
-    )
-    models = []
-    for ensemble_number in range(num_ensembles):
-        model = fluent.Payload(
-            run_model,
-            kwargs=dict(ckpt = ckpt, lead_time = lead_time, device=devices[ensemble_number] if devices is not None else None, **kwargs),
-        )
-        models.append(model)
-
-    prediction = source.map(models)
-
-    return _expand(prediction, get_coords(DefaultRunner(ckpt), lead_time))
-
-def with_initial_conditions(
-    initial_conditions,
-    ckpt: fluent.Action | fluent.Payload | Callable | Any,
-    lead_time: int,
-    *,
-    action: type[fluent.Action] = None,
-    devices: list[str] | str | None = None,
-    **kwargs,
-    ):
+        Cascade action of the model results
     """
-    _summary_
+    lead_time = to_timedelta(lead_time)
+
+    model_payload = fluent.Payload(collect_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
+    model_results = input_state_source.map(model_payload)
+    return model_results
+    
+    return _expand(runner, model_results, lead_time)
+
+def from_config(
+    config: os.PathLike,
+    overrides: dict[str, Any] = None,
+    *,
+    date: str | tuple[int, int, int] = None,
+    ensemble_members: int = 1,
+    **kwargs,
+) -> fluent.Action: 
+    """
+    Run an anemoi model from a configuration file
 
     Parameters
     ----------
-    initial_conditions : _type_
-        _description_
-    ckpt : _type_
-        _description_
-    lead_time : int
-        _description_
-    action : type[fluent.Action], optional
-        _description_, by default None
-    devices : list[str] | str | None, optional
-        _description_, by default None
+    config : os.PathLike
+        Path to the configuration file
+    overrides : dict[str, Any], optional
+        Override for the config, by default None
+    date : str | tuple[int, int, int], optional
+        Specific override for date, by default None
+    ensemble_members : int, optional
+        Number of ensemble members to run, by default 1
+    Returns
+    -------
+    fluent.Action
+        Cascade action of the model results
+
+    Examples
+    --------
+    >>> from anemoicascade import from_config
+    >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
+    """
+    
+    from anemoi.inference.config import load_config
+    from anemoi.inference.runners.default import DefaultRunner
+    
+    kwargs.update(overrides or {})
+    overrides = [f"{key}={value}" for key, value in kwargs.items()]
+
+    config = load_config(config, overrides)
+
+    runner = DefaultRunner(config)
+    runner.checkpoint.validate_environment(on_difference='warn')
+
+    input = runner.create_input()
+
+    input_state_source = get_initial_conditions_source(input = input, date = date or config.date, ensemble_members = ensemble_members)
+
+    return _run_model(runner, input_state_source, config.lead_time)
+
+
+def from_input(
+    ckpt: os.PathLike,
+    input: str | dict[str, Any],
+    date: str | tuple[int, int, int],
+    lead_time: Any,
+    *,
+    ensemble_members: int = 1,
+    **kwargs,
+) -> fluent.Action:
+    """
+    Run an anemoi model from a given input source
+
+    Parameters
+    ----------
+    ckpt : os.PathLike
+        Checkpoint to load
+    input : str | dict[str, Any]
+        `anemoi.inference` input source.
+        Can be `mars`, `grib`, etc or a dictionary of input configuration
+    date : str | tuple[int, int, int]
+        Date to get initial conditions for
+    lead_time : Any
+        Lead time to run out to. Can be a string, 
+        i.e. `1H`, `1D`, int, or a datetime.timedelta
+    ensemble_members : int, optional
+        Number of ensemble members to run, by default 1
 
     Returns
     -------
-    _type_
-        _description_
+    fluent.Action
+        Cascade action of the model results
+
+    Examples
+    -------
+    >>> from anemoicascade import from_input
+    >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """    
+    from anemoi.inference.runners.default import DefaultRunner
+    from anemoi.inference.inputs import create_input
+    from anemoi.inference.config import Configuration
+
+    config = Configuration(checkpoint=ckpt, input = input, **kwargs)
+
+    runner = DefaultRunner(config)
+    runner.checkpoint.validate_environment(on_difference='warn')
+
+    input = create_input(runner, input)
+
+    input_state_source = get_initial_conditions_source(input = input, date = date, ensemble_members = ensemble_members)
+
+    return _run_model(runner, input_state_source, lead_time)
+
+def from_initial_conditions(
+    ckpt: os.PathLike,
+    initial_conditions: dict[str, Any] | fluent.Action | fluent.Payload | Callable,
+    lead_time: Any,
+    **kwargs,
+) -> fluent.Action:
+    """
+    Run an anemoi model from initial conditions
+
+    Parameters
+    ----------
+    ckpt : os.PathLike
+        Checkpoint to load
+    initial_conditions : dict[str, Any] | fluent.Action | fluent.Payload | Callable
+        Initial conditions for the model
+        Can be other fluent actions, payloads, or a callable, or a input state dictionary
+    lead_time : Any
+        Lead time to run out to. Can be a string, 
+        i.e. `1H`, `1D`, int, or a datetime.timedelta
+
+    Returns
+    -------
+    fluent.Action
+        Cascade action of the model results
+
+    Examples
+    --------
+    >>> from anemoicascade import from_initial_conditions
+    >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
+    """
+    from anemoi.inference.runners.simple import SimpleRunner
+    runner = SimpleRunner(ckpt, **kwargs)
+    runner.checkpoint.validate_environment(on_difference='warn')
+
     if isinstance(initial_conditions, fluent.Action):
         initial_conditions = initial_conditions
     elif isinstance(initial_conditions, (Callable, fluent.Payload)):
-        initial_conditions = fluent.from_source([initial_conditions], action=action or fluent.Action)
+        initial_conditions = fluent.from_source([initial_conditions])
     else:
-        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)], action=action or fluent.Action)
+        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])
 
-    models = fluent.Payload(
-        run_model,
-        kwargs=dict(ckpt = ckpt, lead_time = lead_time, devices=devices, **kwargs),
-    )
-    prediction = initial_conditions.map(models)
-    return _expand(prediction, get_coords(DefaultRunner(ckpt), lead_time))
-     
+    return _run_model(runner, initial_conditions, lead_time)
+
 
 class AnemoiActions(fluent.Action):
-    def infer(self, ckpt: str, lead_time: int, **kwargs) -> fluent.Action:
+
+    def infer(self, ckpt: os.PathLike, lead_time: Any, **kwargs) -> fluent.Action:
         """
         Map a model prediction to all nodes within 
         the graph, using them as initial conditions
 
         Parameters
         ----------
-        ckpt : str
-            Model checkpoint to load
-        lead_time : int
-            Lead time to predict out to in hours
+        ckpt : os.PathLike
+            Checkpoint to load
+        lead_time : Any
+            Lead time to run out to. Can be a string, 
+            i.e. `1H`, `1D`, int, or a datetime.timedelta
 
         Returns
         -------
         fluent.Action
-            Expanded action with model predictions
+            Cascade action of the model results
         """        
-        return with_initial_conditions(self, ckpt, lead_time, **kwargs)
-        
-    
+        return from_initial_conditions(ckpt, self, lead_time, **kwargs)
+
     
 fluent.Action.register("anemoi", AnemoiActions)
