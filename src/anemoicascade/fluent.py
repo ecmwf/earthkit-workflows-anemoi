@@ -97,7 +97,6 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any
 
     model_payload = fluent.Payload(collect_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
     model_results = input_state_source.map(model_payload)
-    return model_results
     
     return _expand(runner, model_results, lead_time)
 

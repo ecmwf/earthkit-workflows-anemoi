@@ -92,4 +92,6 @@ def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> Si
     fields = []
     for state in run_as_earthkit(input_state, runner, lead_time):
         fields.extend(state.fields)
+        
+    print(SimpleFieldList(fields).unique_values('param', 'step'))
     return SimpleFieldList(fields)
