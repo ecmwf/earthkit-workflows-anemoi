@@ -28,17 +28,17 @@ def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetim
     else:
         return datetime.datetime(*date)
 
-def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
+def _get_initial_conditions(input: Input, date: str | tuple[int, int, int], ens_mem: int = 0) -> Any:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date = _parse_date(date))
-    # input_state.pop('_grib_templates_for_output', None)
+    input_state.pop('_grib_templates_for_output', None)
     return input_state
 
 def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1) -> fluent.Action:
-    init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
+    # init_condition = 
     return fluent.from_source(
         [
-            [init_condition for _ in range(ensemble_members)],
+            [fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date, ens_mem = i)) for i in range(ensemble_members)],
         ],
         coords = {'date': [date], "member": range(ensemble_members)},
     )
