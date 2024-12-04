@@ -28,20 +28,36 @@ def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetim
     else:
         return datetime.datetime(*date)
 
-def _get_initial_conditions(input: Input, date: str | tuple[int, int, int], ens_mem: int = 0) -> Any:
+def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date = _parse_date(date))
     input_state.pop('_grib_templates_for_output', None)
     return input_state
 
+def _empty_payload(x, ens_num):
+    return x
+    
+def _transform_fake(act: fluent.Action, ens_num):
+    empty_payload = fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num])
+    return act.map(empty_payload)
+
 def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1) -> fluent.Action:
-    # init_condition = 
-    return fluent.from_source(
+    # init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
+    # return fluent.from_source(
+    #     [
+    #         [init_condition for _ in range(ensemble_members)],
+    #     ],
+    #     coords = {'date': [date], "member": range(ensemble_members)},
+    # )
+    init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
+    single_init = fluent.from_source(
         [
-            [fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date, ens_mem = i)) for i in range(ensemble_members)],
+            init_condition,
         ],
-        coords = {'date': [date], "member": range(ensemble_members)},
+        coords = {'date': [date]},
     )
+    # Wrap with empty payload to simulate ensemble members
+    return single_init.transform(_transform_fake, list(zip(range(ensemble_members))), 'ensemble_member')
 
 def _time_range(start, end, step):
     """Get a range of timedeltas"""
