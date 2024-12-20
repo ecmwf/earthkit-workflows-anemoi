@@ -34,21 +34,53 @@ def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> A
     input_state.pop('_grib_templates_for_output', None)
     return input_state
 
-def _empty_payload(x, ens_num):
-    return x
-    
-def _transform_fake(act: fluent.Action, ens_num):
-    empty_payload = fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num])
-    return act.map(empty_payload)
+def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], ens_mem: int) -> Any:
+    """Get initial conditions for the model"""
+    from anemoi.inference.inputs.mars import MarsInput
+    if isinstance(input, MarsInput):
+        input.kwargs['number'] = ens_mem
+    input_state = input.create_input_state(date = _parse_date(date))
+    input_state.pop('_grib_templates_for_output', None)
+    return input_state
 
-def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1) -> fluent.Action:
-    # init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
-    # return fluent.from_source(
-    #     [
-    #         [init_condition for _ in range(ensemble_members)],
-    #     ],
-    #     coords = {'date': [date], "member": range(ensemble_members)},
-    # )
+def _transform_fake(act: fluent.Action, ens_num: int):
+    """Transform the action to simulate ensemble members"""
+    def _empty_payload(x, ens_num: int):
+        _ = ens_num
+        assert isinstance(x, dict), "Input state must be a dictionary"
+        return x
+    return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
+
+def get_initial_conditions_source(input: Input, date: str | tuple[int, int, int], ensemble_members: int = 1, *, initial_condition_perturbation: bool = False) -> fluent.Action:
+    """
+    Get the initial conditions for the model
+
+    Parameters
+    ----------
+    input : Input
+        Input object
+    date : str | tuple[int, int, int]
+        Date to get initial conditions for
+    ensemble_members : int, optional
+        Number of ensemble members to get, by default 1
+    initial_condition_perturbation : bool, optional
+        Whether to get perturbed initial conditions, by default False
+        If False, only one initial condition is returned, and 
+        the ensemble members are simulated by wrapping the action.
+
+    Returns
+    -------
+    fluent.Action
+        Fluent action of the initial conditions
+    """
+    if initial_condition_perturbation:
+        return fluent.from_source(
+            [
+                [fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input = input, date = date, ens_mem = ens_mem)) for ens_mem in range(ensemble_members)],
+            ],
+            coords = {'date': [date], "ensemble_member": range(ensemble_members)},
+        )
+    
     init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input = input, date = date))
     single_init = fluent.from_source(
         [
@@ -154,16 +186,16 @@ def from_config(
     kwargs.update(overrides or {})
     overrides = [f"{key}={value}" for key, value in kwargs.items()]
 
-    config = load_config(config, overrides)
+    configuration = load_config(config, overrides)
 
-    runner = DefaultRunner(config)
+    runner = DefaultRunner(configuration)
     runner.checkpoint.validate_environment(on_difference='warn')
 
     input = runner.create_input()
 
-    input_state_source = get_initial_conditions_source(input = input, date = date or config.date, ensemble_members = ensemble_members)
+    input_state_source = get_initial_conditions_source(input = input, date = date or configuration.date, ensemble_members = ensemble_members)
 
-    return _run_model(runner, input_state_source, config.lead_time)
+    return _run_model(runner, input_state_source, configuration.lead_time)
 
 
 def from_input(
