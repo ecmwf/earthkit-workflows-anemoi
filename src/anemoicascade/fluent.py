@@ -11,7 +11,6 @@ import logging
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.dates import frequency_to_seconds
 
-
 from anemoicascade.inference import run_as_earthkit, collect_as_earthkit
 
 
