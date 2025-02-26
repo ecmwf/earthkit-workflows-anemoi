@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, Union
 import datetime
 
 from cascade import fluent
 
 import logging
 
-from anemoicascade.inference import run_as_earthkit, collect_as_earthkit
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.dates import frequency_to_seconds
+
+
+from anemoicascade.inference import run_as_earthkit, collect_as_earthkit
 
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
     from anemoi.inference.runner import Runner
 
+VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
 LOG = logging.getLogger(__name__)
 
 def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetime.datetime:
@@ -97,30 +100,25 @@ def _time_range(start, end, step):
         yield start
         start += step
 
-def _expand(runner: Runner, model_results: fluent.Action, lead_time: datetime.timedelta, remap: bool = False) -> fluent.Action:
+def _expand(runner: Runner, model_results: fluent.Action, remap: bool = False) -> fluent.Action:
     """Expand model results to the correct dimensions"""
-    model_step = runner.checkpoint.timestep
-    steps = list(map(lambda x: frequency_to_seconds(x) // 3600, _time_range(model_step, lead_time + model_step, model_step)))
-
-    # Expand by time
-    model_results_by_time: fluent.Action = model_results.expand(('step', steps), ('step', steps), backend_kwargs=dict(method="sel"))
 
     # Expand by variable
     variables = [*runner.checkpoint.diagnostic_variables, *runner.checkpoint.prognostic_variables]
 
     # Seperate surface and pressure variables
     surface_vars  = [var for var in variables if "_" not in var]
-    # pressure_vars = [var for var in variables if "_" in var]
+    # pressure_vars_complete = [var for var in variables if "_" in var]
+
     pressure_vars = list(set(var.split('_')[0] for var in variables if "_" in var))
+    # pressure_levels = list(set(var.split('_')[1] for var in variables if "_" in var))
 
-    surface_expansion = model_results_by_time.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
-    # pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}" if remap else None}))
-    pressure_vars = model_results_by_time.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel"))
+    surface_expansion = model_results.expand(('param', surface_vars), ('param', surface_vars), backend_kwargs=dict(method="sel"))
+    # pressure_expansion = model_results.expand(('param', pressure_vars_complete), ('param', pressure_vars_complete), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}" if remap else None}))
+    pressure_expansion = model_results.expand(('param', pressure_vars), ('param', pressure_vars), backend_kwargs=dict(method="sel"))
+    # pressure_expansion = pressure_expansion.expand(('level', pressure_levels), ('level', pressure_levels), backend_kwargs=dict(method="sel"))
 
-    return surface_expansion.join(pressure_vars, dim = 'param')
-
-    # model_results_by_variable: fluent.Action = model_results_by_time.expand(('param', variables), ('param', variables), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}"} if remap else None))
-    # return model_results_by_variable
+    return surface_expansion.join(pressure_expansion, dim = 'param')
 
 def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
     """
@@ -143,13 +141,17 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any
     """
     lead_time = to_timedelta(lead_time)
 
-    model_payload = fluent.Payload(collect_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
-    model_results = input_state_source.map(model_payload)
+    model_payload = fluent.Payload(run_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
+
+    model_step = runner.checkpoint.timestep
+    steps = list(map(lambda x: frequency_to_seconds(x) // 3600, _time_range(model_step, lead_time + model_step, model_step)))
+
+    model_results = input_state_source.map(model_payload, yields=('step', steps))
     
     return _expand(runner, model_results, lead_time)
 
 def from_config(
-    config: os.PathLike,
+    config: os.PathLike | dict[str, Any],
     overrides: dict[str, Any] = None,
     *,
     date: str | tuple[int, int, int] = None,
@@ -161,8 +163,8 @@ def from_config(
 
     Parameters
     ----------
-    config : os.PathLike
-        Path to the configuration file
+    config : os.PathLike | dict[str, Any]
+        Path to the configuration file, or dictionary of configuration
     overrides : dict[str, Any], optional
         Override for the config, by default None
     date : str | tuple[int, int, int], optional
@@ -180,26 +182,30 @@ def from_config(
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
     
-    from anemoi.inference.config import load_config
+    from anemoi.inference.config import load_config, Configuration
+
     from anemoi.inference.runners.default import DefaultRunner
     
     kwargs.update(overrides or {})
-    overrides = [f"{key}={value}" for key, value in kwargs.items()]
 
-    configuration = load_config(config, overrides)
+    if isinstance(config, os.PathLike):
+        overrides = [f"{key}={value}" for key, value in kwargs.items()]
+        configuration = load_config(config, overrides)
+    else:
+        config.update(kwargs)
+        configuration = Configuration(**config)
 
     runner = DefaultRunner(configuration)
     runner.checkpoint.validate_environment(on_difference='warn')
 
     input = runner.create_input()
-
     input_state_source = get_initial_conditions_source(input = input, date = date or configuration.date, ensemble_members = ensemble_members)
 
     return _run_model(runner, input_state_source, configuration.lead_time)
 
 
 def from_input(
-    ckpt: os.PathLike,
+    ckpt: VALID_CKPT,
     input: str | dict[str, Any],
     date: str | tuple[int, int, int],
     lead_time: Any,
@@ -212,7 +218,7 @@ def from_input(
 
     Parameters
     ----------
-    ckpt : os.PathLike
+    ckpt : VALID_CKPT
         Checkpoint to load
     input : str | dict[str, Any]
         `anemoi.inference` input source.
@@ -236,7 +242,7 @@ def from_input(
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """    
     from anemoi.inference.runners.default import DefaultRunner
-    from anemoi.inference.inputs import create_input
+
     from anemoi.inference.config import Configuration
 
     config = Configuration(checkpoint=ckpt, input = input, **kwargs)
@@ -244,16 +250,18 @@ def from_input(
     runner = DefaultRunner(config)
     runner.checkpoint.validate_environment(on_difference='warn')
 
-    input = create_input(runner, input)
-
+    input = runner.create_input()
     input_state_source = get_initial_conditions_source(input = input, date = date, ensemble_members = ensemble_members)
 
     return _run_model(runner, input_state_source, lead_time)
 
 def from_initial_conditions(
-    ckpt: os.PathLike,
+    ckpt: VALID_CKPT,
     initial_conditions: dict[str, Any] | fluent.Action | fluent.Payload | Callable,
     lead_time: Any,
+    configuration_kwargs: dict[str, Any] | None = None,
+    *,
+    ensemble_members: int = 1,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -261,15 +269,18 @@ def from_initial_conditions(
 
     Parameters
     ----------
-    ckpt : os.PathLike
+    ckpt : VALID_CKPT
         Checkpoint to load
-    initial_conditions : dict[str, Any] | fluent.Action | fluent.Payload | Callable
+    initial_conditions : FieldList | fluent.Action | fluent.Payload | Callable
         Initial conditions for the model
-        Can be other fluent actions, payloads, or a callable, or a input state dictionary
+        Can be other fluent actions, payloads, or a callable, or a FieldList
     lead_time : Any
         Lead time to run out to. Can be a string, 
         i.e. `1H`, `1D`, int, or a datetime.timedelta
-
+    configuration_kwargs: dict[str, Any]:
+        kwargs for `anemoi.inference` configuration
+    ensemble_members : int, optional
+        Number of ensemble members to run, by default 1
     Returns
     -------
     fluent.Action
@@ -280,8 +291,9 @@ def from_initial_conditions(
     >>> from anemoicascade import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-    from anemoi.inference.runners.simple import SimpleRunner
-    runner = SimpleRunner(ckpt, **kwargs)
+    from anemoicascade.runner import CascadeRunner
+
+    runner = CascadeRunner.from_kwargs(checkpoint = ckpt, configuration_kwargs = configuration_kwargs, **kwargs)
     runner.checkpoint.validate_environment(on_difference='warn')
 
     if isinstance(initial_conditions, fluent.Action):
@@ -291,12 +303,13 @@ def from_initial_conditions(
     else:
         initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])
 
-    return _run_model(runner, initial_conditions, lead_time)
+    ens_initial_conditions =  initial_conditions.transform(_transform_fake, list(zip(range(ensemble_members))), 'ensemble_member')
+    return _run_model(runner, ens_initial_conditions, lead_time)
 
 
 class AnemoiActions(fluent.Action):
 
-    def infer(self, ckpt: os.PathLike, lead_time: Any, **kwargs) -> fluent.Action:
+    def infer(self, ckpt: os.PathLike, lead_time: Any, configuration_kwargs: dict[str, Any] | None = None, **kwargs) -> fluent.Action:
         """
         Map a model prediction to all nodes within 
         the graph, using them as initial conditions
@@ -308,13 +321,15 @@ class AnemoiActions(fluent.Action):
         lead_time : Any
             Lead time to run out to. Can be a string, 
             i.e. `1H`, `1D`, int, or a datetime.timedelta
+        configuration_kwargs: dict[str, Any]:
+            kwargs for anemoi.inference configuration
 
         Returns
         -------
         fluent.Action
             Cascade action of the model results
         """        
-        return from_initial_conditions(ckpt, self, lead_time, **kwargs)
+        return from_initial_conditions(ckpt, self, lead_time, configuration_kwargs = configuration_kwargs, **kwargs)
 
     
 fluent.Action.register("anemoi", AnemoiActions)
