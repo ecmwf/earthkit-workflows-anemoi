@@ -1,4 +1,4 @@
-# anemoi-cascade
+# anemoi-cascade
 
 <p align="center">
   <a href="https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity">
@@ -22,3 +22,12 @@
 > This software is **Sandbox** and subject to ECMWF's guidelines on [Software Maturity](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity).
 
 Connects anemoi-inference to cascade to enable running models within a cascade graph.
+
+```python
+
+CKPT = {'huggingface': 'ecmwf/aifs-single-1.0'}
+
+model_action = anemoi.cascade.fluent.from_input(CKPT, 'mars', '2022-01-01T00:00', lead_time = '7D', ensemble_members=51)
+model_action
+
+```
