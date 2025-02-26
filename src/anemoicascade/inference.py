@@ -5,21 +5,21 @@ from typing import Any, Generator, TYPE_CHECKING
 
 from earthkit.data import FieldList, SimpleFieldList, ArrayField
 from earthkit.data.utils.metadata.dict import UserMetadata
-from earthkit.data.utils.dates import time_to_grib, date_to_grib
+# from earthkit.data.utils.dates import time_to_grib, date_to_grib
 
 from anemoi.utils.dates import frequency_to_seconds
 
 if TYPE_CHECKING:
-    from anemoi.inference.runner import Runner
+    from anemoicascade.runner import CascadeRunner
 
-def run(input_state: dict, runner: Runner, lead_time: int) -> Generator[Any, None, None]:
+def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[Any, None, None]:
     """
     Run the model
 
     Parameters
     ----------
-    runner : Runner
-        Runner object
+    runner : CascadeRunner
+        CascadeRunner object
     input_state : dict
         Initial conditions for the model
     lead_time : int
@@ -27,19 +27,19 @@ def run(input_state: dict, runner: Runner, lead_time: int) -> Generator[Any, Non
 
     Yields
     ------
-    Generator[SimpleFieldList, None, None]
+    Generator[Any, None, None]
         State of the model at each time step
     """
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
-def run_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> Generator[SimpleFieldList, None, None]:
+def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) -> Generator[SimpleFieldList, None, None]:
     """
     Run the model and yield the results as earthkit FieldList
 
     Parameters
     ----------
-    runner : Runner
-        Runner Object
+    runner : CascadeRunner
+        CascadeRunner Object
     input_state : dict
         Initial Conditions for the model
     lead_time : Any
@@ -71,14 +71,14 @@ def run_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> Genera
 
         yield FieldList.from_fields(fields)
 
-def collect_as_earthkit(input_state: dict, runner: Runner, lead_time: Any) -> SimpleFieldList:
+def collect_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) -> SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
 
     Parameters
     ----------
-    runner : Runner
-        Runner object
+    runner : CascadeRunner
+        CascadeRunner object
     input_state : dict
         Initial conditions for the model
     lead_time : Any
