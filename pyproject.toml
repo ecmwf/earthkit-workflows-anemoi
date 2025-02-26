@@ -21,7 +21,7 @@ license = { text = "Apache License Version 2.0" }
 requires-python = ">=3.9"
 dependencies = [
     "anemoi-inference>0.3.0",
-    "cascade-python @ git+https://github.com/ecmwf/cascade.git",
+    "cascade-python @ git+https://github.com/ecmwf/cascade.git@fluent-generators",
     "earthkit-data @ git+https://github.com/ecmwf/earthkit-data.git",
 ]
 dynamic = [ "version" ]
@@ -34,7 +34,7 @@ include-package-data = true
 zip-safe = false
 
 [tool.setuptools_scm]
-version_file = "src/anemoicascade/_version.py"
+version_file = "src/anemoi/cascade/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]
