@@ -10,7 +10,7 @@ from earthkit.data.utils.metadata.dict import UserMetadata
 from anemoi.utils.dates import frequency_to_seconds
 
 if TYPE_CHECKING:
-    from anemoicascade.runner import CascadeRunner
+    from anemoi.cascade.runner import CascadeRunner
 
 def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[Any, None, None]:
     """

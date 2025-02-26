@@ -11,7 +11,7 @@ import logging
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.dates import frequency_to_seconds
 
-from anemoicascade.inference import run_as_earthkit, collect_as_earthkit
+from anemoi.cascade.inference import run_as_earthkit, collect_as_earthkit
 
 
 if TYPE_CHECKING:
@@ -290,7 +290,7 @@ def from_initial_conditions(
     >>> from anemoicascade import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-    from anemoicascade.runner import CascadeRunner
+    from anemoi.cascade.runner import CascadeRunner
 
     runner = CascadeRunner.from_kwargs(checkpoint = ckpt, configuration_kwargs = configuration_kwargs, **kwargs)
     runner.checkpoint.validate_environment(on_difference='warn')

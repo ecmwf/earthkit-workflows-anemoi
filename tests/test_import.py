@@ -1,4 +1,4 @@
 
 
 def test_import():
-    import anemoicascade
+    import anemoi.cascade

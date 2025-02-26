@@ -4,7 +4,7 @@ Provide a connection between anemoi and cascade.
 Exposes the `fluent` API for running anemoi models in cascade.
 """
 
-from anemoicascade import fluent
+from anemoi.cascade import fluent
 
 from cascade.backends import register as register_backend
 
@@ -21,3 +21,5 @@ try:
 except ImportError:  # pragma: no cover
     # Local copy or not installed with setuptools
     __version__ = "999"
+
+__all__ = ["fluent", "__version__"]
