@@ -129,7 +129,7 @@ def get_initial_conditions_source(
     )
     # Wrap with empty payload to simulate ensemble members
     return single_init.transform(
-        _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), "ensemble_member"
+        _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), ("ensemble_member", ensemble_members)
     )
 
 
@@ -383,7 +383,7 @@ def from_initial_conditions(
 
     else:
         ens_initial_conditions = initial_conditions.transform(
-            _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), "ensemble_member"
+            _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), ("ensemble_member", ensemble_members)
         )
     return _run_model(runner, ens_initial_conditions, lead_time)
 
