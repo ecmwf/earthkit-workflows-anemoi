@@ -351,9 +351,15 @@ def from_initial_conditions(
     else:
         initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])
 
-    ens_initial_conditions = initial_conditions.transform(
-        _transform_fake, list(zip(range(ensemble_members))), "ensemble_member"
-    )
+    if "ensemble_member" in initial_conditions.nodes.dims:
+        if not len(initial_conditions.nodes.coords["ensemble_member"]) == ensemble_members:
+            raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
+        ens_initial_conditions = initial_conditions
+
+    else:
+        ens_initial_conditions = initial_conditions.transform(
+            _transform_fake, list(zip(range(ensemble_members))), "ensemble_member"
+        )
     return _run_model(runner, ens_initial_conditions, lead_time)
 
 
