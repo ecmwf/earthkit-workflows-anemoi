@@ -1,4 +1,3 @@
-
 """
 Custom Cascade Runner
 
@@ -10,18 +9,21 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-
+from anemoi.inference.config import Configuration
+from anemoi.inference.forcings import BoundaryForcings
+from anemoi.inference.forcings import ComputedForcings
+from anemoi.inference.forcings import CoupledForcings
+from anemoi.inference.inputs import create_input
+from anemoi.inference.runner import Runner
 from anemoi.utils.config import DotDict
 from pydantic import BaseModel
 
-from anemoi.inference.forcings import BoundaryForcings, ComputedForcings, CoupledForcings
-from anemoi.inference.runner import Runner
-from anemoi.inference.inputs import create_input
-from anemoi.inference.config import Configuration
-
 LOG = logging.getLogger(__name__)
 
+
 class CascadeRunner(Runner):
+    """Cascade Inference Runner"""
+
     def __init__(self, config: dict | Configuration, **kwargs):
 
         if isinstance(config, dict):
@@ -35,7 +37,7 @@ class CascadeRunner(Runner):
         self.config = config
 
         default_init_args = dict(
-            checkpoint = config.checkpoint,
+            checkpoint=config.checkpoint,
             device=config.device,
             precision=config.precision,
             allow_nans=config.allow_nans,
@@ -46,9 +48,7 @@ class CascadeRunner(Runner):
         )
         default_init_args.update(kwargs)
 
-        super().__init__(
-            **default_init_args
-        )
+        super().__init__(**default_init_args)
 
     def create_input(self):
         input = create_input(self, self.config.input)
@@ -99,8 +99,9 @@ class CascadeRunner(Runner):
         LOG.info("Boundary forcing: %s", result)
         return result
 
-
     @staticmethod
-    def from_kwargs(checkpoint: str | dict[str, Any], configuration_kwargs: dict[str, Any] | None = None, **kwargs) -> 'CascadeRunner':
-        config = Configuration(checkpoint = checkpoint, **(configuration_kwargs or {}))
+    def from_kwargs(
+        checkpoint: str | dict[str, Any], configuration_kwargs: dict[str, Any] | None = None, **kwargs
+    ) -> "CascadeRunner":
+        config = Configuration(checkpoint=checkpoint, **(configuration_kwargs or {}))
         return CascadeRunner(config, **kwargs)

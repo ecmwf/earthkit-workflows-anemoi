@@ -14,31 +14,37 @@ requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 [project]
 name = "anemoi-cascade"
 description = "A Cascade interface to anemoi inference"
+license = { text = "Apache License Version 2.0" }
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
-license = { text = "Apache License Version 2.0" }
 requires-python = ">=3.9"
-dependencies = [
-    "anemoi-inference>0.3.0",
-    "cascade-python @ git+https://github.com/ecmwf/cascade.git@fluent-generators",
-    "earthkit-data @ git+https://github.com/ecmwf/earthkit-data.git",
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 dynamic = [ "version" ]
 
-[project.optional-dependencies]
-tests = ["pytest"]
+dependencies = [
+  "anemoi-inference>0.3",
+  "cascade-python @ git+https://github.com/ecmwf/cascade.git@fluent-generators",
+  "earthkit-data @ git+https://github.com/ecmwf/earthkit-data.git",
+]
+optional-dependencies.tests = [ "pytest" ]
 
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
 
+[tool.setuptools.packages.find]
+where = [ "src" ]
+
 [tool.setuptools_scm]
 version_file = "src/anemoi/cascade/_version.py"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
 [tool.isort]
 profile = "black"
-

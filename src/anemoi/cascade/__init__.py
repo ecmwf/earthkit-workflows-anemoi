@@ -4,13 +4,13 @@ Provide a connection between anemoi and cascade.
 Exposes the `fluent` API for running anemoi models in cascade.
 """
 
-from anemoi.cascade import fluent
-
 from cascade.backends import register as register_backend
+from earthkit.data import SimpleFieldList
+
+from anemoi.cascade import fluent
 
 from .backends.fieldlist import SimpleFieldListBackend
 
-from earthkit.data import SimpleFieldList
 register_backend(SimpleFieldList, SimpleFieldListBackend)
 
 

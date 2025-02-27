@@ -1,19 +1,16 @@
-import array_api_compat
-from meters import ResourceMeter
 from typing import TypeAlias
 
-from earthkit.meteo.extreme import array as extreme
-from earthkit.meteo.stats import array as stats
-
+import array_api_compat
 from cascade.backends import num_args
-
-from earthkit.data import SimpleFieldList, ArrayField
+from earthkit.data import ArrayField
+from earthkit.data import SimpleFieldList
 from earthkit.data.readers.grib.metadata import StandAloneGribMetadata
 from earthkit.data.readers.grib.output import GribCoder
-
+from meters import ResourceMeter
 
 # from anemoicascade.wrappers.metadata import StandAloneGribMetadata
 # from anemoicascade.wrappers.array_list import SimpleFieldList
+
 
 def standardise_output(data):
     # Also, nest the data to avoid problems with not finding geography attribute
@@ -43,6 +40,7 @@ def resolve_metadata(metadata: Metadata, *args) -> dict:
         return metadata
     return metadata(*args)
 
+
 def new_field(data, metadata: StandAloneGribMetadata, overrides: dict):
     if len(overrides) > 0:
         try:
@@ -60,18 +58,19 @@ def new_field(data, metadata: StandAloneGribMetadata, overrides: dict):
             print(e)
     return ArrayField(standardise_output(data), metadata)
 
+
 def new_fieldlist(data, metadata: list[StandAloneGribMetadata], overrides: dict):
     if not isinstance(data, list):
         data = [data]
     if not isinstance(metadata, list):
         metadata = [metadata]
-    
+
     return SimpleFieldList(list(new_field(data[i], metadata[i], overrides) for i in range(len(data))))
 
 
 def make_field_list(array, template, **kwargs):
     """Make a SimpleFieldList from array, template and kwargs using GribCoder.encode"""
-    handle = GribCoder(template = template).encode(None, **kwargs)
+    handle = GribCoder(template=template).encode(None, **kwargs)
     meta = StandAloneGribMetadata(handle)
     return SimpleFieldList(array, meta)
 
@@ -90,9 +89,7 @@ class SimpleFieldListBackend:
         xp = array_api_compat.array_namespace(*values)
         return xp.asarray(values)
 
-    def multi_arg_function(
-        func: str, *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
+    def multi_arg_function(func: str, *arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
         with ResourceMeter(func.upper()):
             merged_array = SimpleFieldListBackend._merge(*arrays)
             xp = array_api_compat.array_namespace(*merged_array)
@@ -103,14 +100,10 @@ class SimpleFieldListBackend:
                 resolve_metadata(metadata, *arrays),
             )
 
-    def two_arg_function(
-        func: str, *arrays: SimpleFieldList, metadata: Metadata = None
-    ) -> SimpleFieldList:
+    def two_arg_function(func: str, *arrays: SimpleFieldList, metadata: Metadata = None) -> SimpleFieldList:
         with ResourceMeter(func.upper()):
             # First argument must be FieldList
-            assert isinstance(
-                arrays[0], SimpleFieldList
-            ), f"Expected SimpleFieldList type, got {type(arrays[0])}"
+            assert isinstance(arrays[0], SimpleFieldList), f"Expected SimpleFieldList type, got {type(arrays[0])}"
             val1 = arrays[0].values
             if isinstance(arrays[1], SimpleFieldList):
                 val2 = arrays[1].values
@@ -121,88 +114,50 @@ class SimpleFieldListBackend:
                 metadata = resolve_metadata(metadata, arrays[0])
                 xp = array_api_compat.array_namespace(val1)
             res = getattr(xp, func)(val1, val2)
-            return new_fieldlist(
-                res, [arrays[0][x].metadata() for x in range(len(res))], metadata
-            )
+            return new_fieldlist(res, [arrays[0][x].metadata() for x in range(len(res))], metadata)
 
-    def mean(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "mean", *arrays, metadata=metadata
-        )
+    def mean(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.multi_arg_function("mean", *arrays, metadata=metadata)
 
     def std(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "std", *arrays, metadata=metadata
-        )
+        return SimpleFieldListBackend.multi_arg_function("std", *arrays, metadata=metadata)
 
     def min(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "min", *arrays, metadata=metadata
-        )
+        return SimpleFieldListBackend.multi_arg_function("min", *arrays, metadata=metadata)
 
     def max(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "max", *arrays, metadata=metadata
-        )
+        return SimpleFieldListBackend.multi_arg_function("max", *arrays, metadata=metadata)
 
     def sum(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "sum", *arrays, metadata=metadata
-        )
+        return SimpleFieldListBackend.multi_arg_function("sum", *arrays, metadata=metadata)
 
-    def prod(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "prod", *arrays, metadata=metadata
-        )
+    def prod(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.multi_arg_function("prod", *arrays, metadata=metadata)
 
     def var(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
-        return SimpleFieldListBackend.multi_arg_function(
-            "var", *arrays, metadata=metadata
-        )
+        return SimpleFieldListBackend.multi_arg_function("var", *arrays, metadata=metadata)
 
     def stack(*arrays: list[SimpleFieldList], axis: int = 0) -> SimpleFieldList:
         if axis != 0:
             raise ValueError("Can not stack FieldList along axis != 0")
-        assert all(
-            [len(x) == 1 for x in arrays]
-        ), "Can not stack FieldLists with more than one element, use concat"
+        assert all([len(x) == 1 for x in arrays]), "Can not stack FieldLists with more than one element, use concat"
         return SimpleFieldListBackend.concat(*arrays)
 
     def add(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
         return SimpleFieldListBackend.two_arg_function("add", *arrays, metadata=metadata)
 
-    def subtract(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.two_arg_function(
-            "subtract", *arrays, metadata=metadata
-        )
+    def subtract(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.two_arg_function("subtract", *arrays, metadata=metadata)
 
     @num_args(2)
-    def diff(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.multiply(
-            SimpleFieldListBackend.subtract(*arrays, metadata=metadata), -1
-        )
+    def diff(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.multiply(SimpleFieldListBackend.subtract(*arrays, metadata=metadata), -1)
 
-    def multiply(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.two_arg_function(
-            "multiply", *arrays, metadata=metadata
-        )
+    def multiply(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.two_arg_function("multiply", *arrays, metadata=metadata)
 
-    def divide(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
-        return SimpleFieldListBackend.two_arg_function(
-            "divide", *arrays, metadata=metadata
-        )
+    def divide(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
+        return SimpleFieldListBackend.two_arg_function("divide", *arrays, metadata=metadata)
 
     def pow(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
         return SimpleFieldListBackend.two_arg_function("pow", *arrays, metadata=metadata)
@@ -241,21 +196,17 @@ class SimpleFieldListBackend:
             ret = array[indices]
         else:
             if not isinstance(dim, str):
-                raise ValueError(
-                    "To perform isel/sel on FieldList, dim must be a string"
-                )
+                raise ValueError("To perform isel/sel on FieldList, dim must be a string")
             if method == "isel":
                 ret = array.isel(**{dim: indices}, **kwargs)
             elif method == "sel":
                 ret = array.sel(**{dim: indices}, **kwargs)
             else:
                 raise ValueError(f"Invalid method {method}")
-        
+
         return ret
 
-    def norm(
-        *arrays: list[SimpleFieldList], metadata: Metadata = None
-    ) -> SimpleFieldList:
+    def norm(*arrays: list[SimpleFieldList], metadata: Metadata = None) -> SimpleFieldList:
         merged_array = SimpleFieldListBackend._merge(*arrays)
         xp = array_api_compat.array_namespace(merged_array)
         norm = standardise_output(xp.sqrt(xp.sum(xp.pow(merged_array, 2), axis=0)))
@@ -346,9 +297,7 @@ class SimpleFieldListBackend:
             xp = array_api_compat.array_namespace(arr1.values, arr2.values)
             condition = comp_str2func(xp, comparison)(arr2.values, threshold)
             res = xp.where(condition, replacement, arr1.values)
-            return new_fieldlist(
-                res, arr1.metadata(), resolve_metadata(metadata, arr1, arr2)
-            )
+            return new_fieldlist(res, arr1.metadata(), resolve_metadata(metadata, arr1, arr2))
 
     # def pca(
     #     config,
