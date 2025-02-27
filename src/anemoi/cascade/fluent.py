@@ -10,6 +10,7 @@ import os
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
+from typing import Sequence
 from typing import Union
 
 from anemoi.utils.dates import frequency_to_seconds
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from anemoi.inference.runner import Runner
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
+ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
+
 LOG = logging.getLogger(__name__)
 
 
@@ -68,10 +71,19 @@ def _transform_fake(act: fluent.Action, ens_num: int):
     return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
 
 
+def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int]:
+    """Parse ensemble members"""
+    if isinstance(ensemble_members, int):
+        if ensemble_members < 1:
+            raise ValueError("Number of ensemble members must be greater than 0.")
+        return list(range(ensemble_members))
+    return list(ensemble_members)
+
+
 def get_initial_conditions_source(
     input: Input,
     date: str | tuple[int, int, int],
-    ensemble_members: int = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     *,
     initial_condition_perturbation: bool = False,
 ) -> fluent.Action:
@@ -84,7 +96,7 @@ def get_initial_conditions_source(
         Input object
     date : str | tuple[int, int, int]
         Date to get initial conditions for
-    ensemble_members : int, optional
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to get, by default 1
     initial_condition_perturbation : bool, optional
         Whether to get perturbed initial conditions, by default False
@@ -96,14 +108,13 @@ def get_initial_conditions_source(
     fluent.Action
         Fluent action of the initial conditions
     """
-    assert ensemble_members >= 1, "Number of ensemble members must be greater or equal to 1"
 
     if initial_condition_perturbation:
         return fluent.from_source(
             [
                 [
                     fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
-                    for ens_mem in range(ensemble_members)
+                    for ens_mem in _parse_ensemble_members(ensemble_members)
                 ],
             ],
             coords={"date": [_parse_date(date)], "ensemble_member": range(ensemble_members)},
@@ -117,7 +128,9 @@ def get_initial_conditions_source(
         coords={"date": [_parse_date(date)]},
     )
     # Wrap with empty payload to simulate ensemble members
-    return single_init.transform(_transform_fake, list(zip(range(ensemble_members))), "ensemble_member")
+    return single_init.transform(
+        _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), "ensemble_member"
+    )
 
 
 def _time_range(start, end, step):
@@ -192,7 +205,7 @@ def from_config(
     overrides: dict[str, Any] | None = None,
     *,
     date: str | tuple[int, int, int] | None = None,
-    ensemble_members: int = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -206,7 +219,7 @@ def from_config(
         Override for the config, by default None
     date : str | tuple[int, int, int], optional
         Specific override for date, by default None
-    ensemble_members : int, optional
+    ensemble_members : ENSE , optional
         Number of ensemble members to run, by default 1
     kwargs : dict
         Additional arguments to pass to the runner
@@ -252,7 +265,7 @@ def from_input(
     date: str | tuple[int, int, int],
     lead_time: Any,
     *,
-    ensemble_members: int = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -270,7 +283,7 @@ def from_input(
     lead_time : Any
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
-    ensemble_members : int, optional
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to run, by default 1
     kwargs : dict
         Additional arguments to pass to the runner
@@ -306,7 +319,7 @@ def from_initial_conditions(
     lead_time: Any,
     configuration_kwargs: dict[str, Any] | None = None,
     *,
-    ensemble_members: int = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -319,13 +332,20 @@ def from_initial_conditions(
     initial_conditions : FieldList | fluent.Action | fluent.Payload | Callable
         Initial conditions for the model
         Can be other fluent actions, payloads, or a callable, or a FieldList
+        If a fluent action and multiple ensemble member initial conditions
+        are included, the dimension must be named `ensemble_member`.
     lead_time : Any
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     configuration_kwargs: dict[str, Any]:
         kwargs for `anemoi.inference` configuration
-    ensemble_members : int, optional
-        Number of ensemble members to run, by default 1
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
+        Number of ensemble members to run,
+        If initial_conditions is a fluent action, with
+        multiple ensemble members, this argument can be set to None,
+        and the number of ensemble members will be inferred from the action.
+        If not set, the number of ensemble members will default to 1.
+        by default None.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -352,13 +372,18 @@ def from_initial_conditions(
         initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])
 
     if "ensemble_member" in initial_conditions.nodes.dims:
-        if not len(initial_conditions.nodes.coords["ensemble_member"]) == ensemble_members:
+        if ensemble_members is None:
+            ensemble_members = len(initial_conditions.nodes.coords["ensemble_member"])
+
+        ensemble_members = _parse_ensemble_members(ensemble_members)
+
+        if not len(initial_conditions.nodes.coords["ensemble_member"]) == len(ensemble_members):
             raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
         ens_initial_conditions = initial_conditions
 
     else:
         ens_initial_conditions = initial_conditions.transform(
-            _transform_fake, list(zip(range(ensemble_members))), "ensemble_member"
+            _transform_fake, list(zip(_parse_ensemble_members(ensemble_members))), "ensemble_member"
         )
     return _run_model(runner, ens_initial_conditions, lead_time)
 

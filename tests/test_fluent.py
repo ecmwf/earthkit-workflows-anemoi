@@ -4,6 +4,9 @@ from anemoi.cascade.fluent import from_initial_conditions
 from anemoi.cascade.fluent import get_initial_conditions_source
 
 from .mocks import MockInput
+from .mocks import mocked_metadata
+
+_ = mocked_metadata
 
 
 @pytest.fixture
@@ -15,7 +18,11 @@ def mock_input():
     "date, ensemble_members, perturbation, shape",
     [
         ["2000-01-01", 1, False, {"date": 1}],
+        ["2000-01-01", [2], False, {"date": 1}],
+        ["2000-01-01", range(1, 2), False, {"date": 1}],
         ["2000-01-01", 10, False, {"date": 1, "ensemble_member": 10}],
+        ["2000-01-01", range(10), False, {"date": 1, "ensemble_member": 10}],
+        ["2000-01-01", range(10, 20), False, {"date": 1, "ensemble_member": 10}],
         ["2000-01-01", 10, True, {"date": 1, "ensemble_member": 10}],
         ["2000-01-01", 51, False, {"date": 1, "ensemble_member": 51}],
         ["2000-01-01", 51, True, {"date": 1, "ensemble_member": 51}],
@@ -43,7 +50,7 @@ def test_get_initial_conditions(mock_input, date, ensemble_members, perturbation
 )
 def test_get_initial_conditions_fail(mock_input, date, ensemble_members, perturbation, shape):
     """Test failing to get initial conditions"""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         _ = get_initial_conditions_source(
             mock_input, date, ensemble_members, initial_condition_perturbation=perturbation
         )
@@ -120,6 +127,7 @@ def test_from_initial_conditions(
     [
         [10, {"lead_time": "1D"}, {"step": 4, "ensemble_member": 10, "param": 30}],
         [10, {"lead_time": "4D"}, {"step": 16, "ensemble_member": 10, "param": 30}],
+        [None, {"lead_time": "4D"}, {"step": 16, "ensemble_member": 10, "param": 30}],
     ],
 )
 def test_from_many_initial_conditions(
