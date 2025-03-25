@@ -31,7 +31,7 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-inference>0.3",
-  "cascade-python @ git+https://github.com/ecmwf/cascade.git",
+  "cascade-python @ git+https://github.com/ecmwf/cascade.git@develop",
   "earthkit-data @ git+https://github.com/ecmwf/earthkit-data.git",
 ]
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
