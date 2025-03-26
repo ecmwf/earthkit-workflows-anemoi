@@ -117,7 +117,7 @@ def get_initial_conditions_source(
                     fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
                     for ens_mem in _parse_ensemble_members(ensemble_members)
                 ],
-            ],
+            ], # type: ignore
             coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: range(ensemble_members)},
         )
 
@@ -125,14 +125,14 @@ def get_initial_conditions_source(
     single_init = fluent.from_source(
         [
             init_condition,
-        ],
+        ], # type: ignore
         coords={"date": [_parse_date(date)]},
     )
     # Wrap with empty payload to simulate ensemble members
     return single_init.transform(
         _transform_fake,
         list(zip(_parse_ensemble_members(ensemble_members))),
-        (ENSEMBLE_DIMENSION_NAME, ensemble_members),
+        (ENSEMBLE_DIMENSION_NAME, range(ensemble_members)), # type: ignore
     )
 
 
@@ -264,7 +264,7 @@ def from_config(
 
 def from_input(
     ckpt: VALID_CKPT,
-    input: str | dict[str, Any],
+    input: str | dict[str, Any], # type: ignore
     date: str | tuple[int, int, int],
     lead_time: Any,
     *,
@@ -302,15 +302,16 @@ def from_input(
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     from anemoi.inference.config import Configuration
+    from anemoi.inference.input import Input
 
     from .runner import CascadeRunner
 
-    config = Configuration(checkpoint=ckpt, input=input, **kwargs)
+    config = Configuration(checkpoint=str(ckpt), input=input, **kwargs)
 
     runner = CascadeRunner(config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    input = runner.create_input()
+    input: Input = runner.create_input()
     input_state_source = get_initial_conditions_source(input=input, date=date, ensemble_members=ensemble_members)
 
     return _run_model(runner, input_state_source, lead_time)
@@ -364,15 +365,15 @@ def from_initial_conditions(
     """
     from anemoi.cascade.runner import CascadeRunner
 
-    runner = CascadeRunner.from_kwargs(checkpoint=ckpt, configuration_kwargs=configuration_kwargs, **kwargs)
+    runner = CascadeRunner.from_kwargs(checkpoint=str(ckpt), configuration_kwargs=configuration_kwargs, **kwargs)
     runner.checkpoint.validate_environment(on_difference="warn")
 
     if isinstance(initial_conditions, fluent.Action):
         initial_conditions = initial_conditions
     elif isinstance(initial_conditions, (Callable, fluent.Payload)):
-        initial_conditions = fluent.from_source([initial_conditions])
+        initial_conditions = fluent.from_source([initial_conditions]) # type: ignore
     else:
-        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])
+        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)]) # type: ignore
 
     if ENSEMBLE_DIMENSION_NAME in initial_conditions.nodes.dims:
         if ensemble_members is None:
@@ -387,8 +388,8 @@ def from_initial_conditions(
     else:
         ens_initial_conditions = initial_conditions.transform(
             _transform_fake,
-            list(zip(_parse_ensemble_members(ensemble_members))),
-            (ENSEMBLE_DIMENSION_NAME, ensemble_members),
+            list(zip(_parse_ensemble_members(ensemble_members))), # type: ignore
+            (ENSEMBLE_DIMENSION_NAME, ensemble_members), # type: ignore
         )
     return _run_model(runner, ens_initial_conditions, lead_time)
 
