@@ -17,11 +17,13 @@ from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from cascade import fluent
 
-from anemoi.cascade.inference import run_as_earthkit
+from anemoi.cascade.inference import run_as_earthkit, run_as_earthkit_from_config
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
     from anemoi.inference.runner import Runner
+    from anemoi.inference.config import Configuration
+    from .runner import CascadeRunner
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
@@ -43,10 +45,17 @@ def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetim
 def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date=_parse_date(date))
+    assert isinstance(input_state, dict), "Input state must be a dictionary"
     input_state.pop("_grib_templates_for_output", None)
 
     return input_state
 
+
+def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tuple[int, int, int]) -> Any:
+    """Get initial conditions for the model"""
+    runner = CascadeRunner(config)
+    input = runner.create_input()
+    return _get_initial_conditions(input, date)
 
 def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], ens_mem: int) -> Any:
     """Get initial conditions for the model"""
@@ -61,6 +70,11 @@ def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], 
 
     return input_state
 
+def _get_initial_conditions_ens_from_config(config: dict[str, Any], date: str | tuple[int, int, int], ens_mem: int) -> Any:
+    """Get initial conditions for the model"""
+    runner = CascadeRunner(config)
+    input = runner.create_input()
+    return _get_initial_conditions_ens(input, date, ens_mem)
 
 def _transform_fake(act: fluent.Action, ens_num: int):
     """Transform the action to simulate ensemble members"""
@@ -84,6 +98,7 @@ def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> 
 
 def get_initial_conditions_source(
     input: Input,
+    config: Configuration,
     date: str | tuple[int, int, int],
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     *,
@@ -115,14 +130,16 @@ def get_initial_conditions_source(
         return fluent.from_source(
             [
                 [
-                    fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
+                    # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
+                    fluent.Payload(_get_initial_conditions_ens_from_config, kwargs=dict(config=config, date=date, ens_mem=ens_mem))
                     for ens_mem in ensemble_members
                 ],
             ], # type: ignore
             coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
         )
 
-    init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input=input, date=date))
+    # init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input=input, date=date))
+    init_condition = fluent.Payload(_get_initial_conditions_from_config, kwargs=dict(config=config, date=date))
     single_init = fluent.from_source(
         [
             init_condition,
@@ -147,7 +164,7 @@ def _time_range(start, end, step):
         start += step
 
 
-def _expand(runner: Runner, model_results: fluent.Action, remap: bool = False) -> fluent.Action:
+def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = False) -> fluent.Action:
     """Expand model results to the correct dimensions"""
 
     # Expand by variable
@@ -172,7 +189,7 @@ def _expand(runner: Runner, model_results: fluent.Action, remap: bool = False) -
     return surface_expansion.join(pressure_expansion, dim="param")
 
 
-def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
+def _run_model(runner: CascadeRunner, config: Configuration, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
     """
     Run the model, expanding the results to the correct dimensions
 
@@ -195,7 +212,7 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any
     """
     lead_time = to_timedelta(lead_time)
 
-    model_payload = fluent.Payload(run_as_earthkit, kwargs=dict(runner=runner, lead_time=lead_time, **kwargs))
+    model_payload = fluent.Payload(run_as_earthkit_from_config, args = (fluent.Node.input_name(0),), kwargs = dict(config=config, lead_time=lead_time, **kwargs))
 
     model_step = runner.checkpoint.timestep
     steps = list(
@@ -205,7 +222,6 @@ def _run_model(runner: Runner, input_state_source: fluent.Action, lead_time: Any
     model_results = input_state_source.map(model_payload, yields=("step", steps))
 
     return _expand(runner, model_results, lead_time)
-
 
 def from_config(
     config: os.PathLike | dict[str, Any],
@@ -244,7 +260,7 @@ def from_config(
 
     from anemoi.inference.config import Configuration
     from anemoi.inference.config import load_config
-    from anemoi.inference.runners.default import DefaultRunner
+    from .runner import CascadeRunner
 
     kwargs.update(overrides or {})
 
@@ -255,15 +271,15 @@ def from_config(
         config.update(kwargs)
         configuration = Configuration(**config)
 
-    runner = DefaultRunner(configuration)
+    runner = CascadeRunner(configuration)
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input = runner.create_input()
     input_state_source = get_initial_conditions_source(
-        input=input, date=date or configuration.date, ensemble_members=ensemble_members
+        input=input, date=date or configuration.date, ensemble_members=ensemble_members, config=configuration,
     )
 
-    return _run_model(runner, input_state_source, configuration.lead_time)
+    return _run_model(runner, configuration, input_state_source, configuration.lead_time)
 
 
 def from_input(
@@ -306,7 +322,6 @@ def from_input(
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     from anemoi.inference.config import Configuration
-    from anemoi.inference.input import Input
 
     from .runner import CascadeRunner
 
@@ -316,8 +331,9 @@ def from_input(
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input: Input = runner.create_input()
-    input_state_source = get_initial_conditions_source(input=input, date=date, ensemble_members=ensemble_members)
-    return _run_model(runner, input_state_source, lead_time)
+    input_state_source = get_initial_conditions_source(input=input, date=date, ensemble_members=ensemble_members, config = config)
+
+    return _run_model(runner, config, input_state_source, lead_time)
 
 
 def from_initial_conditions(
@@ -368,7 +384,9 @@ def from_initial_conditions(
     """
     from anemoi.cascade.runner import CascadeRunner
 
-    runner = CascadeRunner.from_kwargs(checkpoint=str(ckpt), configuration_kwargs=configuration_kwargs, **kwargs)
+    config = Configuration(checkpoint=str(ckpt), **(configuration_kwargs or {}))
+    runner = CascadeRunner(config, **kwargs)
+
     runner.checkpoint.validate_environment(on_difference="warn")
 
     if isinstance(initial_conditions, fluent.Action):
@@ -394,7 +412,7 @@ def from_initial_conditions(
             list(zip(_parse_ensemble_members(ensemble_members))), # type: ignore
             (ENSEMBLE_DIMENSION_NAME, ensemble_members), # type: ignore
         )
-    return _run_model(runner, ens_initial_conditions, lead_time)
+    return _run_model(runner, config, ens_initial_conditions, lead_time)
 
 
 class Action(fluent.Action):
