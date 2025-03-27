@@ -56,6 +56,7 @@ def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], 
         input.kwargs["number"] = ens_mem
 
     input_state = input.create_input_state(date=_parse_date(date))
+    assert isinstance(input_state, dict), "Input state must be a dictionary"
     input_state.pop("_grib_templates_for_output", None)
 
     return input_state
@@ -109,16 +110,16 @@ def get_initial_conditions_source(
     fluent.Action
         Fluent action of the initial conditions
     """
-
+    ensemble_members = _parse_ensemble_members(ensemble_members)
     if initial_condition_perturbation:
         return fluent.from_source(
             [
                 [
                     fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
-                    for ens_mem in _parse_ensemble_members(ensemble_members)
+                    for ens_mem in ensemble_members
                 ],
             ], # type: ignore
-            coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: range(ensemble_members)},
+            coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
         )
 
     init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input=input, date=date))
@@ -129,11 +130,14 @@ def get_initial_conditions_source(
         coords={"date": [_parse_date(date)]},
     )
     # Wrap with empty payload to simulate ensemble members
-    return single_init.transform(
+    expanded_init = single_init.transform(
         _transform_fake,
-        list(zip(_parse_ensemble_members(ensemble_members))),
-        (ENSEMBLE_DIMENSION_NAME, range(ensemble_members)), # type: ignore
+        list(zip(ensemble_members)),
+        (ENSEMBLE_DIMENSION_NAME, ensemble_members), # type: ignore
     )
+    if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
+        expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
+    return expanded_init
 
 
 def _time_range(start, end, step):
@@ -313,7 +317,6 @@ def from_input(
 
     input: Input = runner.create_input()
     input_state_source = get_initial_conditions_source(input=input, date=date, ensemble_members=ensemble_members)
-
     return _run_model(runner, input_state_source, lead_time)
 
 
