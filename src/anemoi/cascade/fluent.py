@@ -21,7 +21,6 @@ from anemoi.cascade.inference import run_as_earthkit, run_as_earthkit_from_confi
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
-    from anemoi.inference.runner import Runner
     from anemoi.inference.config import Configuration
     from .runner import CascadeRunner
 
@@ -53,6 +52,8 @@ def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> A
 
 def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tuple[int, int, int]) -> Any:
     """Get initial conditions for the model"""
+    from .runner import CascadeRunner
+    
     runner = CascadeRunner(config)
     input = runner.create_input()
     return _get_initial_conditions(input, date)
