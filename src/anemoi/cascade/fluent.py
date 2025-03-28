@@ -258,18 +258,17 @@ def from_config(
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
 
-    from anemoi.inference.config import Configuration
-    from anemoi.inference.config import load_config
+    from anemoi.inference.config.run import RunConfiguration
     from .runner import CascadeRunner
 
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
         override_values = [f"{key}={value}" for key, value in kwargs.items()]
-        configuration = load_config(config, override_values)
+        configuration = RunConfiguration.load(config, override_values)
     else:
         config.update(kwargs)
-        configuration = Configuration(**config)
+        configuration = RunConfiguration(**config)
 
     runner = CascadeRunner(configuration)
     runner.checkpoint.validate_environment(on_difference="warn")
@@ -321,11 +320,11 @@ def from_input(
     >>> from anemoi.cascade.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
-    from anemoi.inference.config import Configuration
+    from anemoi.inference.config.run import RunConfiguration
 
     from .runner import CascadeRunner
 
-    config = Configuration(checkpoint=str(ckpt), input=input, **kwargs)
+    config = RunConfiguration(checkpoint=str(ckpt), input=input, **kwargs)
 
     runner = CascadeRunner(config)
     runner.checkpoint.validate_environment(on_difference="warn")
