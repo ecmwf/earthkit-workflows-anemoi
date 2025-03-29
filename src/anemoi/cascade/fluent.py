@@ -18,11 +18,11 @@ from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from cascade import fluent
 
 from anemoi.cascade.inference import run_as_earthkit, run_as_earthkit_from_config
+from anemoi.cascade.runner import CascadeRunner
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
     from anemoi.inference.config import Configuration
-    from .runner import CascadeRunner
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
@@ -52,8 +52,6 @@ def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> A
 
 def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tuple[int, int, int]) -> Any:
     """Get initial conditions for the model"""
-    from .runner import CascadeRunner
-    
     runner = CascadeRunner(config)
     input = runner.create_input()
     return _get_initial_conditions(input, date)
