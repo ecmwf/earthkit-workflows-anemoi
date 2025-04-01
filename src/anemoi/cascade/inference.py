@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generator
+import functools
 
 from anemoi.utils.dates import frequency_to_seconds
 from earthkit.data import ArrayField
@@ -13,9 +14,10 @@ from earthkit.data.utils.metadata.dict import UserMetadata
 
 # from earthkit.data.utils.dates import time_to_grib, date_to_grib
 
+from anemoi.cascade.runner import CascadeRunner
 
 if TYPE_CHECKING:
-    from anemoi.cascade.runner import CascadeRunner
+    from anemoi.inference.config import Configuration
 
 
 def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[Any, None, None]:
@@ -86,6 +88,11 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
 
         yield FieldList.from_fields(fields)
 
+@functools.wraps(run_as_earthkit)
+def run_as_earthkit_from_config(input_state: dict, config: Configuration, lead_time: Any) -> Generator[SimpleFieldList, None, None]:
+    """Run from config"""
+    runner = CascadeRunner(config)
+    yield from run_as_earthkit(input_state, runner, lead_time)
 
 def collect_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) -> SimpleFieldList:
     """

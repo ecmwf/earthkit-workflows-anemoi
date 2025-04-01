@@ -7,16 +7,27 @@ Used for when providing initial conditions
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
+from typing import Dict
+from typing import List
 
 from anemoi.inference.config import Configuration
 from anemoi.inference.forcings import BoundaryForcings
 from anemoi.inference.forcings import ComputedForcings
 from anemoi.inference.forcings import CoupledForcings
+from anemoi.inference.forcings import Forcings
+
 from anemoi.inference.inputs import create_input
 from anemoi.inference.runner import Runner
+
 from anemoi.utils.config import DotDict
+
 from pydantic import BaseModel
+
+from anemoi.inference.input import Input
+from anemoi.inference.types import IntArray
+
 
 LOG = logging.getLogger(__name__)
 
@@ -50,23 +61,70 @@ class CascadeRunner(Runner):
 
         super().__init__(**default_init_args)
 
-    def create_input(self):
+
+    def create_input(self) -> Input:
+        """Create the input.
+
+        Returns
+        -------
+        Input
+            The created input.
+        """
         input = create_input(self, self.config.input)
         LOG.info("Input: %s", input)
         return input
 
-    # Computed forcings
-    def create_constant_computed_forcings(self, variables, mask):
+    def create_constant_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+        """Create constant computed forcings.
+
+        Parameters
+        ----------
+        variables : List[str]
+            The variables for the forcings.
+        mask : IntArray
+            The mask for the forcings.
+
+        Returns
+        -------
+        List[Forcings]
+            The created constant computed forcings.
+        """
         result = ComputedForcings(self, variables, mask)
         LOG.info("Constant computed forcing: %s", result)
-        return result
+        return [result]
 
-    def create_dynamic_computed_forcings(self, variables, mask):
+    def create_dynamic_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+        """Create dynamic computed forcings.
+
+        Parameters
+        ----------
+        variables : List[str]
+            The variables for the forcings.
+        mask : IntArray
+            The mask for the forcings.
+
+        Returns
+        -------
+        List[Forcings]
+            The created dynamic computed forcings.
+        """
         result = ComputedForcings(self, variables, mask)
         LOG.info("Dynamic computed forcing: %s", result)
-        return result
+        return [result]
 
-    def _input_forcings(self, name):
+    def _input_forcings(self, name: str) -> Dict[str, Any]:
+        """Get the input forcings configuration.
+
+        Parameters
+        ----------
+        name : str
+            The name of the forcings configuration.
+
+        Returns
+        -------
+        dict
+            The input forcings configuration.
+        """
         if self.config.forcings is None:
             # Use the same as the input
             return self.config.input
@@ -79,29 +137,112 @@ class CascadeRunner(Runner):
 
         return self.config.forcings
 
-    def create_constant_coupled_forcings(self, variables, mask):
+    def create_constant_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+        """Create constant coupled forcings.
+
+        Parameters
+        ----------
+        variables : list
+            The variables for the forcings.
+        mask : IntArray
+            The mask for the forcings.
+
+        Returns
+        -------
+        List[Forcings]
+            The created constant coupled forcings.
+        """
         input = create_input(self, self._input_forcings("constant"))
         result = CoupledForcings(self, input, variables, mask)
         LOG.info("Constant coupled forcing: %s", result)
-        return result
+        return [result]
 
-    def create_dynamic_coupled_forcings(self, variables, mask):
+    def create_dynamic_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+        """Create dynamic coupled forcings.
 
+        Parameters
+        ----------
+        variables : list
+            The variables for the forcings.
+        mask : IntArray
+            The mask for the forcings.
+
+        Returns
+        -------
+        List[Forcings]
+            The created dynamic coupled forcings.
+        """
         input = create_input(self, self._input_forcings("dynamic"))
         result = CoupledForcings(self, input, variables, mask)
         LOG.info("Dynamic coupled forcing: %s", result)
-        return result
+        return [result]
 
-    def create_boundary_forcings(self, variables, mask):
+    def create_boundary_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+        """Create boundary forcings.
 
+        Parameters
+        ----------
+        variables : list
+            The variables for the forcings.
+        mask : IntArray
+            The mask for the forcings.
+
+        Returns
+        -------
+        List[Forcings]
+            The created boundary forcings.
+        """
         input = create_input(self, self._input_forcings("boundary"))
         result = BoundaryForcings(self, input, variables, mask)
         LOG.info("Boundary forcing: %s", result)
-        return result
+        return [result]
 
-    @staticmethod
-    def from_kwargs(
-        checkpoint: str | dict[str, Any], configuration_kwargs: dict[str, Any] | None = None, **kwargs
-    ) -> "CascadeRunner":
-        config = Configuration(checkpoint=checkpoint, **(configuration_kwargs or {}))
-        return CascadeRunner(config, **kwargs)
+    # def create_pre_processors(self) -> List[Processor]:
+    #     """Create pre-processors.
+
+    #     Returns
+    #     -------
+    #     List[Processor]
+    #         The created pre-processors.
+    #     """
+    #     if self.config.post_processors is None:
+    #         self.config.post_processors = ["accumulate_from_start_of_forecast"]
+    #         warnings.warn(
+    #             """
+    #             No post_processors defined. Accumulations will be accumulated from the beginning of the forecast.
+
+    #             🚧🚧🚧 In a future release, the default will be to NOT accumulate from the beginning of the forecast. 🚧🚧🚧
+    #             Update your config if you wish to keep accumulating from the beginning.
+    #             https://github.com/ecmwf/anemoi-inference/issues/131
+    #             """,
+    #         )
+
+    #     if "accumulate_from_start_of_forecast" not in self.config.post_processors:
+    #         warnings.warn(
+    #             """
+    #             post_processors are defined but `accumulate_from_start_of_forecast` is not set."
+    #             🚧 Accumulations will NOT be accumulated from the beginning of the forecast. 🚧
+    #             """
+    #         )
+
+    #     result = []
+    #     for processor in self.config.pre_processors:
+    #         result.append(create_pre_processor(self, processor))
+
+    #     LOG.info("Pre processors: %s", result)
+    #     return result
+
+    # def create_post_processors(self) -> List[Processor]:
+    #     """Create post-processors.
+
+    #     Returns
+    #     -------
+    #     List[Processor]
+    #         The created post-processors.
+    #     """
+    #     result = []
+    #     for processor in self.config.post_processors:
+    #         result.append(create_post_processor(self, processor))
+
+    #     LOG.info("Post processors: %s", result)
+    #     return result
