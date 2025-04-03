@@ -15,14 +15,14 @@ from typing import Union
 
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
-from cascade import fluent
+from earthkit.workflows import fluent
 
 from anemoi.cascade.inference import run_as_earthkit, run_as_earthkit_from_config
 from anemoi.cascade.runner import CascadeRunner
+from anemoi.inference.config.run import RunConfiguration
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
-    from anemoi.inference.config import Configuration
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
@@ -60,8 +60,8 @@ def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], 
     """Get initial conditions for the model"""
     from anemoi.inference.inputs.mars import MarsInput
 
-    if isinstance(input, MarsInput):
-        input.kwargs["number"] = ens_mem
+    if isinstance(input, MarsInput): # type: ignore
+        input.kwargs["number"] = ens_mem # type: ignore
 
     input_state = input.create_input_state(date=_parse_date(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
@@ -97,7 +97,7 @@ def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> 
 
 def get_initial_conditions_source(
     input: Input,
-    config: Configuration,
+    config: RunConfiguration,
     date: str | tuple[int, int, int],
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     *,
@@ -110,6 +110,8 @@ def get_initial_conditions_source(
     ----------
     input : Input
         Input object
+    config : RunConfiguration
+        Configuration object
     date : str | tuple[int, int, int]
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
@@ -188,7 +190,7 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = F
     return surface_expansion.join(pressure_expansion, dim="param")
 
 
-def _run_model(runner: CascadeRunner, config: Configuration, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
+def _run_model(runner: CascadeRunner, config: RunConfiguration, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
     """
     Run the model, expanding the results to the correct dimensions
 
@@ -196,6 +198,8 @@ def _run_model(runner: CascadeRunner, config: Configuration, input_state_source:
     ----------
     runner : Runner
         `anemoi.inference` runner
+    config : RunConfiguration
+        Configuration object
     input_state_source : fluent.Action
         Fluent action of initial conditions
     lead_time : Any
@@ -257,14 +261,11 @@ def from_config(
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
 
-    from anemoi.inference.config.run import RunConfiguration
-    from .runner import CascadeRunner
-
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
         override_values = [f"{key}={value}" for key, value in kwargs.items()]
-        configuration = RunConfiguration.load(config, override_values)
+        configuration = RunConfiguration.load(str(config), override_values)
     else:
         config.update(kwargs)
         configuration = RunConfiguration(**config)
@@ -274,7 +275,7 @@ def from_config(
 
     input = runner.create_input()
     input_state_source = get_initial_conditions_source(
-        input=input, date=date or configuration.date, ensemble_members=ensemble_members, config=configuration,
+        input=input, date=date or configuration.date, ensemble_members=ensemble_members, config=configuration, # type: ignore
     )
 
     return _run_model(runner, configuration, input_state_source, configuration.lead_time)
@@ -380,9 +381,8 @@ def from_initial_conditions(
     >>> from anemoi.cascade.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-    from anemoi.cascade.runner import CascadeRunner
-
-    config = Configuration(checkpoint=str(ckpt), **(configuration_kwargs or {}))
+    
+    config = RunConfiguration(checkpoint=str(ckpt), **(configuration_kwargs or {}))
     runner = CascadeRunner(config, **kwargs)
 
     runner.checkpoint.validate_environment(on_difference="warn")

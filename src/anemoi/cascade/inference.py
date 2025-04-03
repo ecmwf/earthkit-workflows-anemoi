@@ -7,6 +7,7 @@ from typing import Generator
 import functools
 
 from anemoi.utils.dates import frequency_to_seconds
+
 from earthkit.data import ArrayField
 from earthkit.data import FieldList
 from earthkit.data import SimpleFieldList
