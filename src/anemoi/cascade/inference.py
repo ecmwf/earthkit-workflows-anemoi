@@ -81,7 +81,7 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
                         "base_datetime": initial_date,
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
-                    },
+                    }
             fields.append(ArrayField(array, metadata))
 
         yield FieldList.from_fields(fields)
