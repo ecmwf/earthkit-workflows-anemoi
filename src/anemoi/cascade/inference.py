@@ -83,7 +83,6 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
                     },
-                    array,
                 )
             fields.append(ArrayField(array, metadata))
 
