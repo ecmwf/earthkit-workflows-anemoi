@@ -75,15 +75,13 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
                 )  # 'date': time_to_grib(initial_date), 'time': time_to_grib(initial_date)
 
             else:
-                metadata = UserMetadata(
-                    {
+                metadata = {
                         "shortName": field,
                         "step": step,
                         "base_datetime": initial_date,
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
                     },
-                )
             fields.append(ArrayField(array, metadata))
 
         yield FieldList.from_fields(fields)
