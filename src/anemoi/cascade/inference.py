@@ -22,6 +22,20 @@ if TYPE_CHECKING:
     from anemoi.transform.variables import Variable
 
 
+def paramId_to_units(paramId: int) -> str:
+    from eccodes import codes_get
+    from eccodes import codes_grib_new_from_samples
+    from eccodes import codes_release
+    from eccodes import codes_set
+
+    gid = codes_grib_new_from_samples("GRIB2")
+
+    codes_set(gid, "paramId", paramId)
+    units = codes_get(gid, "units")
+    codes_release(gid)
+    return units
+
+
 def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[Any, None, None]:
     """
     Run the model
@@ -79,15 +93,21 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
 
             else:
                 var = variables[field]
-                metadata = var.grib_keys
+
+                metadata = {}
+                paramId = shortname_to_paramid(var.grib_keys["param"])
+
                 metadata.update(
                     {
                         "step": step,
                         "shortName": var.name,
-                        "paramId": shortname_to_paramid(metadata["param"]),
+                        "short_name": var.name,
+                        "levtype": var.grib_keys["levtype"],
+                        "paramId": paramId,
                         "base_datetime": initial_date,
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
+                        "units": paramId_to_units(paramId),
                         "values": array,  # TODO Remove
                     }
                 )
