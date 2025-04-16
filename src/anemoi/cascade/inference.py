@@ -14,9 +14,6 @@ from earthkit.data import SimpleFieldList
 
 from anemoi.cascade.runner import CascadeRunner
 
-# from earthkit.data.utils.dates import time_to_grib, date_to_grib
-
-
 if TYPE_CHECKING:
     from anemoi.inference.config import Configuration
     from anemoi.transform.variables import Variable
@@ -100,11 +97,12 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
                 metadata.update(
                     {
                         "step": step,
+                        "base_datetime": initial_date,
+                        "valid_datetime": state["date"],
                         "shortName": var.name,
                         "short_name": var.name,
-                        "levtype": var.grib_keys["levtype"],
                         "paramId": paramId,
-                        "base_datetime": initial_date,
+                        "levtype": var.grib_keys["levtype"],
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
                         "units": paramId_to_units(paramId),
