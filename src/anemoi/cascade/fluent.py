@@ -13,13 +13,13 @@ from typing import Callable
 from typing import Sequence
 from typing import Union
 
+from anemoi.inference.config.run import RunConfiguration
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from earthkit.workflows import fluent
 
-from anemoi.cascade.inference import run_as_earthkit, run_as_earthkit_from_config
+from anemoi.cascade.inference import run_as_earthkit_from_config
 from anemoi.cascade.runner import CascadeRunner
-from anemoi.inference.config.run import RunConfiguration
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
@@ -56,31 +56,37 @@ def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tupl
     input = runner.create_input()
     return _get_initial_conditions(input, date)
 
+
 def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], ens_mem: int) -> Any:
     """Get initial conditions for the model"""
     from anemoi.inference.inputs.mars import MarsInput
 
-    if isinstance(input, MarsInput): # type: ignore
-        input.kwargs["number"] = ens_mem # type: ignore
+    if isinstance(input, MarsInput):  # type: ignore
+        input.kwargs["number"] = ens_mem  # type: ignore
 
     input_state = input.create_input_state(date=_parse_date(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
+    input_state["ensemble_member"] = ens_mem
     input_state.pop("_grib_templates_for_output", None)
 
     return input_state
 
-def _get_initial_conditions_ens_from_config(config: dict[str, Any], date: str | tuple[int, int, int], ens_mem: int) -> Any:
+
+def _get_initial_conditions_ens_from_config(
+    config: dict[str, Any], date: str | tuple[int, int, int], ens_mem: int
+) -> Any:
     """Get initial conditions for the model"""
     runner = CascadeRunner(config)
     input = runner.create_input()
     return _get_initial_conditions_ens(input, date, ens_mem)
 
+
 def _transform_fake(act: fluent.Action, ens_num: int):
     """Transform the action to simulate ensemble members"""
 
-    def _empty_payload(x, ens_num: int):
-        _ = ens_num
+    def _empty_payload(x, ens_mem: int):
         assert isinstance(x, dict), "Input state must be a dictionary"
+        x["ensemble_member"] = ens_mem
         return x
 
     return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
@@ -132,10 +138,12 @@ def get_initial_conditions_source(
             [
                 [
                     # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
-                    fluent.Payload(_get_initial_conditions_ens_from_config, kwargs=dict(config=config, date=date, ens_mem=ens_mem))
+                    fluent.Payload(
+                        _get_initial_conditions_ens_from_config, kwargs=dict(config=config, date=date, ens_mem=ens_mem)
+                    )
                     for ens_mem in ensemble_members
                 ],
-            ], # type: ignore
+            ],  # type: ignore
             coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
         )
 
@@ -144,14 +152,14 @@ def get_initial_conditions_source(
     single_init = fluent.from_source(
         [
             init_condition,
-        ], # type: ignore
+        ],  # type: ignore
         coords={"date": [_parse_date(date)]},
     )
     # Wrap with empty payload to simulate ensemble members
     expanded_init = single_init.transform(
         _transform_fake,
         list(zip(ensemble_members)),
-        (ENSEMBLE_DIMENSION_NAME, ensemble_members), # type: ignore
+        (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
     )
     if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
         expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
@@ -190,7 +198,9 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = F
     return surface_expansion.join(pressure_expansion, dim="param")
 
 
-def _run_model(runner: CascadeRunner, config: RunConfiguration, input_state_source: fluent.Action, lead_time: Any, **kwargs) -> fluent.Action:
+def _run_model(
+    runner: CascadeRunner, config: RunConfiguration, input_state_source: fluent.Action, lead_time: Any, **kwargs
+) -> fluent.Action:
     """
     Run the model, expanding the results to the correct dimensions
 
@@ -215,7 +225,11 @@ def _run_model(runner: CascadeRunner, config: RunConfiguration, input_state_sour
     """
     lead_time = to_timedelta(lead_time)
 
-    model_payload = fluent.Payload(run_as_earthkit_from_config, args = (fluent.Node.input_name(0),), kwargs = dict(config=config, lead_time=lead_time, **kwargs))
+    model_payload = fluent.Payload(
+        run_as_earthkit_from_config,
+        args=(fluent.Node.input_name(0),),
+        kwargs=dict(config=config, lead_time=lead_time, **kwargs),
+    )
 
     model_step = runner.checkpoint.timestep
     steps = list(
@@ -225,6 +239,7 @@ def _run_model(runner: CascadeRunner, config: RunConfiguration, input_state_sour
     model_results = input_state_source.map(model_payload, yields=("step", steps))
 
     return _expand(runner, model_results, lead_time)
+
 
 def from_config(
     config: os.PathLike | dict[str, Any],
@@ -275,7 +290,10 @@ def from_config(
 
     input = runner.create_input()
     input_state_source = get_initial_conditions_source(
-        input=input, date=date or configuration.date, ensemble_members=ensemble_members, config=configuration, # type: ignore
+        input=input,
+        date=date or configuration.date,
+        ensemble_members=ensemble_members,
+        config=configuration,  # type: ignore
     )
 
     return _run_model(runner, configuration, input_state_source, configuration.lead_time)
@@ -283,7 +301,7 @@ def from_config(
 
 def from_input(
     ckpt: VALID_CKPT,
-    input: str | dict[str, Any], # type: ignore
+    input: str | dict[str, Any],  # type: ignore
     date: str | tuple[int, int, int],
     lead_time: Any,
     *,
@@ -330,7 +348,9 @@ def from_input(
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input: Input = runner.create_input()
-    input_state_source = get_initial_conditions_source(input=input, date=date, ensemble_members=ensemble_members, config = config)
+    input_state_source = get_initial_conditions_source(
+        input=input, date=date, ensemble_members=ensemble_members, config=config
+    )
 
     return _run_model(runner, config, input_state_source, lead_time)
 
@@ -381,7 +401,7 @@ def from_initial_conditions(
     >>> from anemoi.cascade.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-    
+
     config = RunConfiguration(checkpoint=str(ckpt), **(configuration_kwargs or {}))
     runner = CascadeRunner(config, **kwargs)
 
@@ -390,9 +410,9 @@ def from_initial_conditions(
     if isinstance(initial_conditions, fluent.Action):
         initial_conditions = initial_conditions
     elif isinstance(initial_conditions, (Callable, fluent.Payload)):
-        initial_conditions = fluent.from_source([initial_conditions]) # type: ignore
+        initial_conditions = fluent.from_source([initial_conditions])  # type: ignore
     else:
-        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)]) # type: ignore
+        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])  # type: ignore
 
     if ENSEMBLE_DIMENSION_NAME in initial_conditions.nodes.dims:
         if ensemble_members is None:
@@ -407,8 +427,8 @@ def from_initial_conditions(
     else:
         ens_initial_conditions = initial_conditions.transform(
             _transform_fake,
-            list(zip(_parse_ensemble_members(ensemble_members))), # type: ignore
-            (ENSEMBLE_DIMENSION_NAME, ensemble_members), # type: ignore
+            list(zip(_parse_ensemble_members(ensemble_members))),  # type: ignore
+            (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
         )
     return _run_model(runner, config, ens_initial_conditions, lead_time)
 

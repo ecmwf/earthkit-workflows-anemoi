@@ -54,7 +54,9 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[A
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
 
-def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) -> Generator[SimpleFieldList, None, None]:
+def run_as_earthkit(
+    input_state: dict, runner: CascadeRunner, lead_time: Any, extra_metadata: dict[str, Any] = None
+) -> Generator[SimpleFieldList, None, None]:
     """
     Run the model and yield the results as earthkit FieldList
 
@@ -66,6 +68,8 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
         CascadeRunner Object
     lead_time : Any
         Lead time for the model
+    extra_metadata: dict[str, Any], optional
+        Extra metadata to add to the fields, by default None
 
     Returns
     -------
@@ -73,6 +77,8 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
         State of the model at each time step
     """
     initial_date: datetime = input_state["date"]
+    ensemble_member = input_state.get("ensemble_member")
+    extra_metadata = extra_metadata or {}
 
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
@@ -85,7 +91,7 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
             if "_grib_templates_for_output" in state and field in state["_grib_templates_for_output"]:
                 metadata = state["_grib_templates_for_output"][field].metadata()
                 metadata = metadata.override(
-                    {"step": step}, headers_only_clone=False
+                    {"step": step, "ensemble_member": ensemble_member, **extra_metadata}, headers_only_clone=False
                 )  # 'date': time_to_grib(initial_date), 'time': time_to_grib(initial_date)
 
             else:
@@ -105,27 +111,31 @@ def run_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) ->
                         "levtype": var.grib_keys["levtype"],
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
+                        "member": ensemble_member,
                         "units": paramId_to_units(paramId),
                         "values": array,  # TODO Remove
+                        **extra_metadata,
                     }
                 )
 
             fields.append(ArrayField(array, metadata))
-            fields[-1].metadata().geography
 
         yield FieldList.from_fields(fields)
+    del runner.model
 
 
 @functools.wraps(run_as_earthkit)
 def run_as_earthkit_from_config(
-    input_state: dict, config: Configuration, lead_time: Any
+    input_state: dict, config: Configuration, lead_time: Any, extra_metadata: dict[str, Any] = None
 ) -> Generator[SimpleFieldList, None, None]:
     """Run from config"""
     runner = CascadeRunner(config)
-    yield from run_as_earthkit(input_state, runner, lead_time)
+    yield from run_as_earthkit(input_state, runner, lead_time, extra_metadata)
 
 
-def collect_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any) -> SimpleFieldList:
+def collect_as_earthkit(
+    input_state: dict, runner: CascadeRunner, lead_time: Any, extra_metadata: dict[str, Any] = None
+) -> SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
 
@@ -137,6 +147,8 @@ def collect_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any
         CascadeRunner object
     lead_time : Any
         Lead time for the model
+    extra_metadata: dict[str, Any], optional
+        Extra metadata to add to the fields, by default None
 
     Returns
     -------
@@ -144,7 +156,16 @@ def collect_as_earthkit(input_state: dict, runner: CascadeRunner, lead_time: Any
         Combined FieldList of the model run
     """
     fields = []
-    for state in run_as_earthkit(input_state, runner, lead_time):
+    for state in run_as_earthkit(input_state, runner, lead_time, extra_metadata):
         fields.extend(state.fields)
 
     return SimpleFieldList(fields)
+
+
+@functools.wraps(collect_as_earthkit)
+def collect_as_earthkit_from_config(
+    input_state: dict, config: Configuration, lead_time: Any, extra_metadata: dict[str, Any] = None
+) -> SimpleFieldList:
+    """Run from config"""
+    runner = CascadeRunner(config)
+    return collect_as_earthkit(input_state, runner, lead_time, extra_metadata)
