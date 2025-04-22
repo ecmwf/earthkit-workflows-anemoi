@@ -1,11 +1,19 @@
-"""
-Provide a connection between anemoi and cascade.
+# (C) Copyright 2024- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
 
-Exposes the `fluent` API for running anemoi models in cascade.
+"""
+Provide a connection between anemoi and earthkit-workflows.
+
+Exposes the `fluent` API for running anemoi models in earthkit-workflows.
 """
 
 from anemoi.cascade import fluent
-
 
 try:
     # NOTE: the `version.py` file must not be present in the git repository

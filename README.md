@@ -21,13 +21,48 @@
 > \[!IMPORTANT\]
 > This software is **Sandbox** and subject to ECMWF's guidelines on [Software Maturity](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity).
 
-Connects anemoi-inference to cascade to enable running models within a cascade graph.
+Anemoi-Cascade is a Python library for connecting [anemoi-inference](https://github.com/ecmwf/anemoi-inference) to [earthkit-workflows](https://github.com/ecmwf/earthkit-workflows). Allowing for the inference tasks to be run as part of a larger DAG. It provides an API to directly create a graph consisting of initial condition retrieval and model execution, or to run inference off other source nodes which themselves are the initial conditions.
+
+## Installation
+
+Install via `pip` with:
+
+```bash
+pip install 'anemoi-cascade[all]'
+```
+
+For development, you can use `pip install -e .` Additionally you may want to install pre-commit hooks via
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+## Quick Start
+
+To create a graph relying on anemoi-inference to get the initial conditions the following can be used:
 
 ```python
+
+import anemoi.cascade
 
 CKPT = {'huggingface': 'ecmwf/aifs-single-1.0'}
 
 model_action = anemoi.cascade.fluent.from_input(CKPT, 'mars', '2022-01-01T00:00', lead_time = '7D', ensemble_members=51)
 model_action
+
+```
+
+Given other nodes as the initial conditions:
+
+```python
+
+import anemoi.cascade
+from earthkit.workflows import fluent
+
+SOURCE_NODES: fluent.Action
+CKPT = {'huggingface': 'ecmwf/aifs-single-1.0'}
+
+SOURCE_NODES.anemoi.infer(CKPT, lead_time = '7D', ensemble_members = 51)
 
 ```

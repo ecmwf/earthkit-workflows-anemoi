@@ -1,3 +1,12 @@
+# (C) Copyright 2024- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """
 Custom Cascade Runner
 
@@ -7,7 +16,6 @@ Used for when providing initial conditions
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import Any
 from typing import Dict
 from typing import List
@@ -17,17 +25,12 @@ from anemoi.inference.forcings import BoundaryForcings
 from anemoi.inference.forcings import ComputedForcings
 from anemoi.inference.forcings import CoupledForcings
 from anemoi.inference.forcings import Forcings
-
+from anemoi.inference.input import Input
 from anemoi.inference.inputs import create_input
 from anemoi.inference.runner import Runner
-
-from anemoi.utils.config import DotDict
-
-from pydantic import BaseModel
-
-from anemoi.inference.input import Input
 from anemoi.inference.types import IntArray
-
+from anemoi.utils.config import DotDict
+from pydantic import BaseModel
 
 LOG = logging.getLogger(__name__)
 
@@ -60,7 +63,6 @@ class CascadeRunner(Runner):
         default_init_args.update(kwargs)
 
         super().__init__(**default_init_args)
-
 
     def create_input(self) -> Input:
         """Create the input.
