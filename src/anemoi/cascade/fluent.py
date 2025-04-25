@@ -249,6 +249,11 @@ def create_dataset(
     -------
     fluent.Action
         earthkit.workflows action to create the dataset
+
+    Examples
+    --------
+    >>> from anemoi.cascade.fluent import create_dataset
+    >>> create_dataset("dataset_recipe.yaml", "output_dir/dataset.zarr")
     """
     from anemoi.datasets.create import creator_factory
 
