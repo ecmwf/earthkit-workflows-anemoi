@@ -13,245 +13,32 @@ Fluent API for anemoi inference.
 
 from __future__ import annotations
 
-import datetime
+import functools
 import logging
 import os
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
-from typing import Sequence
-from typing import Union
 
 from anemoi.inference.config.run import RunConfiguration
-from anemoi.utils.dates import frequency_to_seconds
-from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from earthkit.workflows import fluent
 
-from anemoi.cascade.inference import run_as_earthkit_from_config
+from anemoi.cascade.inference import _transform_fake
+from anemoi.cascade.inference import get_initial_conditions_source
+from anemoi.cascade.inference import parse_ensemble_members
+from anemoi.cascade.inference import run_model
 from anemoi.cascade.runner import CascadeRunner
+from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
-    from anemoi.inference.input import Input
-
-VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
-ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
-ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"
+    from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from anemoi.cascade.types import VALID_CKPT
 
 LOG = logging.getLogger(__name__)
 
 
-def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetime.datetime:
-    """Parse date from string or tuple"""
-    if isinstance(date, datetime.datetime):
-        return date
-    elif isinstance(date, str):
-        return datetime.datetime.fromisoformat(date)
-    else:
-        return datetime.datetime(*date)
-
-
-def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
-    """Get initial conditions for the model"""
-    input_state = input.create_input_state(date=_parse_date(date))
-    assert isinstance(input_state, dict), "Input state must be a dictionary"
-    input_state.pop("_grib_templates_for_output", None)
-
-    return input_state
-
-
-def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tuple[int, int, int]) -> Any:
-    """Get initial conditions for the model"""
-    runner = CascadeRunner(config)
-    input = runner.create_input()
-    return _get_initial_conditions(input, date)
-
-
-def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], ens_mem: int) -> Any:
-    """Get initial conditions for the model"""
-    from anemoi.inference.inputs.mars import MarsInput
-
-    if isinstance(input, MarsInput):  # type: ignore
-        input.kwargs["number"] = ens_mem  # type: ignore
-
-    input_state = input.create_input_state(date=_parse_date(date))
-    assert isinstance(input_state, dict), "Input state must be a dictionary"
-    input_state["ensemble_member"] = ens_mem
-    input_state.pop("_grib_templates_for_output", None)
-
-    return input_state
-
-
-def _get_initial_conditions_ens_from_config(
-    config: dict[str, Any], date: str | tuple[int, int, int], ens_mem: int
-) -> Any:
-    """Get initial conditions for the model"""
-    runner = CascadeRunner(config)
-    input = runner.create_input()
-    return _get_initial_conditions_ens(input, date, ens_mem)
-
-
-def _transform_fake(act: fluent.Action, ens_num: int):
-    """Transform the action to simulate ensemble members"""
-
-    def _empty_payload(x, ens_mem: int):
-        assert isinstance(x, dict), "Input state must be a dictionary"
-        x["ensemble_member"] = ens_mem
-        return x
-
-    return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
-
-
-def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int]:
-    """Parse ensemble members"""
-    if isinstance(ensemble_members, int):
-        if ensemble_members < 1:
-            raise ValueError("Number of ensemble members must be greater than 0.")
-        return list(range(ensemble_members))
-    return list(ensemble_members)
-
-
-def get_initial_conditions_source(
-    input: Input,
-    config: RunConfiguration,
-    date: str | tuple[int, int, int],
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
-    *,
-    initial_condition_perturbation: bool = False,
-) -> fluent.Action:
-    """
-    Get the initial conditions for the model
-
-    Parameters
-    ----------
-    input : Input
-        Input object
-    config : RunConfiguration
-        Configuration object
-    date : str | tuple[int, int, int]
-        Date to get initial conditions for
-    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to get, by default 1
-    initial_condition_perturbation : bool, optional
-        Whether to get perturbed initial conditions, by default False
-        If False, only one initial condition is returned, and
-        the ensemble members are simulated by wrapping the action.
-
-    Returns
-    -------
-    fluent.Action
-        Fluent action of the initial conditions
-    """
-    ensemble_members = _parse_ensemble_members(ensemble_members)
-    if initial_condition_perturbation:
-        return fluent.from_source(
-            [
-                [
-                    # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
-                    fluent.Payload(
-                        _get_initial_conditions_ens_from_config, kwargs=dict(config=config, date=date, ens_mem=ens_mem)
-                    )
-                    for ens_mem in ensemble_members
-                ],
-            ],  # type: ignore
-            coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
-        )
-
-    # init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input=input, date=date))
-    init_condition = fluent.Payload(_get_initial_conditions_from_config, kwargs=dict(config=config, date=date))
-    single_init = fluent.from_source(
-        [
-            init_condition,
-        ],  # type: ignore
-        coords={"date": [_parse_date(date)]},
-    )
-    # Wrap with empty payload to simulate ensemble members
-    expanded_init = single_init.transform(
-        _transform_fake,
-        list(zip(ensemble_members)),
-        (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
-    )
-    if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
-        expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
-    return expanded_init
-
-
-def _time_range(start, end, step):
-    """Get a range of timedeltas"""
-    while start < end:
-        yield start
-        start += step
-
-
-def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = False) -> fluent.Action:
-    """Expand model results to the correct dimensions"""
-
-    # Expand by variable
-    variables = [*runner.checkpoint.diagnostic_variables, *runner.checkpoint.prognostic_variables]
-
-    # Seperate surface and pressure variables
-    surface_vars = [var for var in variables if "_" not in var]
-    # pressure_vars_complete = [var for var in variables if "_" in var]
-
-    pressure_vars = list(set(var.split("_")[0] for var in variables if "_" in var))
-    # pressure_levels = list(set(var.split('_')[1] for var in variables if "_" in var))
-
-    surface_expansion = model_results.expand(
-        ("param", surface_vars), ("param", surface_vars), backend_kwargs=dict(method="sel")
-    )
-    # pressure_expansion = model_results.expand(('param', pressure_vars_complete), ('param', pressure_vars_complete), backend_kwargs=dict(method="sel", remapping = {'param':"{param}_{level}" if remap else None}))
-    pressure_expansion = model_results.expand(
-        ("param", pressure_vars), ("param", pressure_vars), backend_kwargs=dict(method="sel")
-    )
-    # pressure_expansion = pressure_expansion.expand(('level', pressure_levels), ('level', pressure_levels), backend_kwargs=dict(method="sel"))
-
-    return surface_expansion.join(pressure_expansion, dim="param")
-
-
-def _run_model(
-    runner: CascadeRunner, config: RunConfiguration, input_state_source: fluent.Action, lead_time: Any, **kwargs
-) -> fluent.Action:
-    """
-    Run the model, expanding the results to the correct dimensions
-
-    Parameters
-    ----------
-    runner : Runner
-        `anemoi.inference` runner
-    config : RunConfiguration
-        Configuration object
-    input_state_source : fluent.Action
-        Fluent action of initial conditions
-    lead_time : Any
-        Lead time to run out to. Can be a string,
-        i.e. `1H`, `1D`, int, or a datetime.timedelta
-    kwargs : dict
-        Additional arguments to pass to the runner
-
-    Returns
-    -------
-    fluent.Action
-        Cascade action of the model results
-    """
-    lead_time = to_timedelta(lead_time)
-
-    model_payload = fluent.Payload(
-        run_as_earthkit_from_config,
-        args=(fluent.Node.input_name(0),),
-        kwargs=dict(config=config, lead_time=lead_time, **kwargs),
-    )
-
-    model_step = runner.checkpoint.timestep
-    steps = list(
-        map(lambda x: frequency_to_seconds(x) // 3600, _time_range(model_step, lead_time + model_step, model_step))
-    )
-
-    model_results = input_state_source.map(model_payload, yields=("step", steps))
-
-    return _expand(runner, model_results, lead_time)
-
-
 def from_config(
-    config: os.PathLike | dict[str, Any],
+    config: os.PathLike | dict[str, Any] | RunConfiguration,
     overrides: dict[str, Any] | None = None,
     *,
     date: str | tuple[int, int, int] | None = None,
@@ -259,7 +46,7 @@ def from_config(
     **kwargs,
 ) -> fluent.Action:
     """
-    Run an anemoi model from a configuration file
+    Run an anemoi inference model from a configuration file
 
     Parameters
     ----------
@@ -277,7 +64,7 @@ def from_config(
     Returns
     -------
     fluent.Action
-        Cascade action of the model results
+        earthkit.workflows action of the model results
 
     Examples
     --------
@@ -288,29 +75,32 @@ def from_config(
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
-        override_values = [f"{key}={value}" for key, value in kwargs.items()]
-        configuration = RunConfiguration.load(str(config), override_values)
-    else:
+        configuration = RunConfiguration.load(str(config), overrides=kwargs)
+    elif isinstance(config, dict):
         config.update(kwargs)
         configuration = RunConfiguration(**config)
+    elif isinstance(config, RunConfiguration):
+        config_dump = config.model_dump()
+        config_dump.update(kwargs)
+        configuration = RunConfiguration(**config_dump)
+    else:
+        raise TypeError(f"Invalid type for config: {type(config)}. " "Must be os.PathLike, dict, or RunConfiguration.")
 
     runner = CascadeRunner(configuration)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    input = runner.create_input()
     input_state_source = get_initial_conditions_source(
-        input=input,
+        config=configuration,  # type: ignore
         date=date or configuration.date,
         ensemble_members=ensemble_members,
-        config=configuration,  # type: ignore
     )
 
-    return _run_model(runner, configuration, input_state_source, configuration.lead_time)
+    return run_model(runner, configuration, input_state_source, configuration.lead_time)
 
 
 def from_input(
     ckpt: VALID_CKPT,
-    input: str | dict[str, Any],  # type: ignore
+    input: str | dict[str, Any],
     date: str | tuple[int, int, int],
     lead_time: Any,
     *,
@@ -318,7 +108,7 @@ def from_input(
     **kwargs,
 ) -> fluent.Action:
     """
-    Run an anemoi model from a given input source
+    Run an anemoi inference model from a given input source
 
     Parameters
     ----------
@@ -326,7 +116,7 @@ def from_input(
         Checkpoint to load
     input : str | dict[str, Any]
         `anemoi.inference` input source.
-        Can be `mars`, `grib`, etc or a dictionary of input configuration
+        Can be `mars`, `grib`, etc or a dictionary of input configuration,
     date : str | tuple[int, int, int]
         Date to get initial conditions for
     lead_time : Any
@@ -340,28 +130,21 @@ def from_input(
     Returns
     -------
     fluent.Action
-        Cascade action of the model results
+        earthkit.workflows action of the model results
 
     Examples
     -------
     >>> from anemoi.cascade.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
-    from anemoi.inference.config.run import RunConfiguration
-
-    from .runner import CascadeRunner
-
     config = RunConfiguration(checkpoint=str(ckpt), input=input, **kwargs)
 
     runner = CascadeRunner(config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    input: Input = runner.create_input()
-    input_state_source = get_initial_conditions_source(
-        input=input, date=date, ensemble_members=ensemble_members, config=config
-    )
+    input_state_source = get_initial_conditions_source(date=date, ensemble_members=ensemble_members, config=config)
 
-    return _run_model(runner, config, input_state_source, lead_time)
+    return run_model(runner, config, input_state_source, lead_time)
 
 
 def from_initial_conditions(
@@ -374,7 +157,7 @@ def from_initial_conditions(
     **kwargs,
 ) -> fluent.Action:
     """
-    Run an anemoi model from initial conditions
+    Run an anemoi inference model from initial conditions
 
     Parameters
     ----------
@@ -403,7 +186,7 @@ def from_initial_conditions(
     Returns
     -------
     fluent.Action
-        Cascade action of the model results
+        earthkit.workflows action of the model results
 
     Examples
     --------
@@ -421,13 +204,13 @@ def from_initial_conditions(
     elif isinstance(initial_conditions, (Callable, fluent.Payload)):
         initial_conditions = fluent.from_source([initial_conditions])  # type: ignore
     else:
-        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)])  # type: ignore
+        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)], dims=["date"])  # type: ignore
 
     if ENSEMBLE_DIMENSION_NAME in initial_conditions.nodes.dims:
         if ensemble_members is None:
             ensemble_members = len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME])
 
-        ensemble_members = _parse_ensemble_members(ensemble_members)
+        ensemble_members = parse_ensemble_members(ensemble_members)
 
         if not len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME]) == len(ensemble_members):
             raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
@@ -436,10 +219,97 @@ def from_initial_conditions(
     else:
         ens_initial_conditions = initial_conditions.transform(
             _transform_fake,
-            list(zip(_parse_ensemble_members(ensemble_members))),  # type: ignore
-            (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
+            list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
+            (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
         )
-    return _run_model(runner, config, ens_initial_conditions, lead_time)
+    return run_model(runner, config, ens_initial_conditions, lead_time)
+
+
+def create_dataset(
+    config: dict[str, Any] | os.PathLike, path: os.PathLike, *, overwrite: bool = False, test: bool = False
+) -> fluent.Action:
+    """
+    Create an anemoi dataset from a configuration.
+
+    Will load a sample from mars before returning the action.
+
+    Parameters
+    ----------
+    config : dict[str, Any] | os.PathLike
+        Configuration to use
+    path : os.PathLike
+        Path to save the dataset to
+    overwrite : bool, optional
+        Whether to overwrite the dataset if it exists, by default False
+    test : bool, optional
+        Build a small dataset, using only the first dates. And, when possible, using low resolution and less ensemble members,
+        by default False
+
+    Returns
+    -------
+    fluent.Action
+        earthkit.workflows action to create the dataset
+    """
+    from anemoi.datasets.create import creator_factory
+
+    options = {"config": config, "path": os.path.abspath(path), "overwrite": overwrite, "test": test}
+
+    total = creator_factory("init", **options).run()
+
+    init = fluent.from_source([lambda: 0], dims=["source"])
+
+    def get_options(part: int):
+        opt = options.copy()
+        opt["parts"] = f"{part+1}/{total}"
+        return opt
+
+    def get_task(name: str, opt: dict[str, Any]) -> Callable[[], Any]:
+        """Get anemoi-datasets task"""
+        task_func = creator_factory(name.replace("-", "_"), **opt)
+
+        @functools.wraps(task_func)
+        def wrapped_func(*prior):
+            return task_func.run()
+
+        if "parts" in opt:
+            wrapped_func.__name__ = f"{name}:{opt['parts']}"
+        else:
+            wrapped_func.__name__ = f"{name}"
+        return wrapped_func
+
+    def apply_sequential_task(prior: fluent.Action, task_name: str, opt: dict[str, Any] | None = None) -> fluent.Action:
+        """Apply a task on each node in the graph"""
+        if opt is None:
+            opt = options.copy()
+        return prior.map(fluent.Payload(get_task(task_name, opt)))
+
+    def apply_parallel_task(node: fluent.Action, task_name: str, dim: str) -> fluent.Action:
+        """Apply a task in parallel creating a new dimension"""
+        parallel_node = node.transform(
+            apply_sequential_task,
+            [(task_name, get_options(n)) for n in range(total)],
+            dim=(dim, list(range(total))),
+        )
+        if dim not in parallel_node.nodes.dims:
+            parallel_node.nodes = parallel_node.nodes.expand_dims(dim)
+        return parallel_node
+
+    def apply_reduction_task(node: fluent.Action, task_name: str, dim: str) -> fluent.Action:
+        """Apply a task which reduces the dimension"""
+        return node.reduce(fluent.Payload(get_task(task_name, options)), dim=dim)
+
+    loaded = apply_parallel_task(init, "load", dim="parts")
+    finalised = apply_reduction_task(loaded, "finalise", dim="parts")
+
+    init_added = apply_sequential_task(finalised, "init-additions")
+    load_added = apply_parallel_task(init_added, "load-additions", "parts")
+    finalise_additions = apply_reduction_task(load_added, "finalise-additions", dim="parts")
+
+    patch = apply_sequential_task(finalise_additions, "patch")
+    cleanup = apply_sequential_task(patch, "cleanup")
+    verify = apply_sequential_task(cleanup, "verify")
+
+    return verify
 
 
 class Action(fluent.Action):
@@ -473,3 +343,11 @@ class Action(fluent.Action):
 
 
 fluent.Action.register("anemoi", Action)
+
+
+__all__ = [
+    "from_config",
+    "from_input",
+    "from_initial_conditions",
+    "Action",
+]
