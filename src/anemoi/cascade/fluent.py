@@ -13,16 +13,17 @@ Fluent API for anemoi inference.
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
 
+from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
 from earthkit.workflows import fluent
 
+from anemoi.cascade.inference import _parse_date
 from anemoi.cascade.inference import _transform_fake
 from anemoi.cascade.inference import get_initial_conditions_source
 from anemoi.cascade.inference import parse_ensemble_members
@@ -226,12 +227,15 @@ def from_initial_conditions(
 
 
 def create_dataset(
-    config: dict[str, Any] | os.PathLike, path: os.PathLike, *, overwrite: bool = False, test: bool = False
+    config: dict[str, Any] | os.PathLike,
+    path: os.PathLike,
+    *,
+    number_of_tasks: int = None,
+    overwrite: bool = False,
+    test: bool = False,
 ) -> fluent.Action:
     """
     Create an anemoi dataset from a configuration.
-
-    Will load a sample from mars before returning the action.
 
     Parameters
     ----------
@@ -239,6 +243,9 @@ def create_dataset(
         Configuration to use
     path : os.PathLike
         Path to save the dataset to
+    number_of_tasks : int, optional
+        Number of tasks to run in parallel, by default None
+        If None, will use a heurisitic based on date groups
     overwrite : bool, optional
         Whether to overwrite the dataset if it exists, by default False
     test : bool, optional
@@ -255,25 +262,42 @@ def create_dataset(
     >>> from anemoi.cascade.fluent import create_dataset
     >>> create_dataset("dataset_recipe.yaml", "output_dir/dataset.zarr")
     """
+    import yaml
     from anemoi.datasets.create import creator_factory
 
-    options = {"config": config, "path": os.path.abspath(path), "overwrite": overwrite, "test": test}
+    config_path, config_dict = None, None
 
-    total = creator_factory("init", **options).run()
+    if isinstance(config, dict):
+        import tempfile
 
-    init = fluent.from_source([lambda: 0], dims=["source"])
+        temp_config_file = tempfile.NamedTemporaryFile(suffix=".yaml")
+        yaml.dump(config, open(temp_config_file.name, "w"))
+        config_path = temp_config_file.name
+        config_dict = config.copy()
+    else:
+        config_path = os.path.realpath(config)
+        config_dict = yaml.safe_load(open(config_path))
 
-    def get_options(part: int):
+    if number_of_tasks is None:
+
+        from anemoi.datasets.create.config import loader_config
+        from anemoi.datasets.dates.groups import Groups
+
+        groups = Groups(**loader_config(config_dict.copy()).dates)
+        number_of_tasks = len(groups) * 25
+
+    options = {"config": config_path, "path": os.path.abspath(path), "overwrite": overwrite, "test": test}
+
+    def get_parallel_options(part: int):
         opt = options.copy()
-        opt["parts"] = f"{part+1}/{total}"
+        opt["parts"] = f"{part+1}/{number_of_tasks}"
         return opt
 
     def get_task(name: str, opt: dict[str, Any]) -> Callable[[], Any]:
         """Get anemoi-datasets task"""
-        task_func = creator_factory(name.replace("-", "_"), **opt)
 
-        @functools.wraps(task_func)
         def wrapped_func(*prior):
+            task_func = creator_factory(name.replace("-", "_"), **opt)
             return task_func.run()
 
         if "parts" in opt:
@@ -292,8 +316,8 @@ def create_dataset(
         """Apply a task in parallel creating a new dimension"""
         parallel_node = node.transform(
             apply_sequential_task,
-            [(task_name, get_options(n)) for n in range(total)],
-            dim=(dim, list(range(total))),
+            [(task_name, get_parallel_options(n)) for n in range(number_of_tasks)],
+            dim=(dim, list(range(number_of_tasks))),
         )
         if dim not in parallel_node.nodes.dims:
             parallel_node.nodes = parallel_node.nodes.expand_dims(dim)
@@ -303,6 +327,7 @@ def create_dataset(
         """Apply a task which reduces the dimension"""
         return node.reduce(fluent.Payload(get_task(task_name, options)), dim=dim)
 
+    init = fluent.from_source([fluent.Payload(get_task("init", options.copy()))], dims=["source"])
     loaded = apply_parallel_task(init, "load", dim="parts")
     finalised = apply_reduction_task(loaded, "finalise", dim="parts")
 
@@ -315,6 +340,85 @@ def create_dataset(
     verify = apply_sequential_task(cleanup, "verify")
 
     return verify
+
+
+def from_dataset(
+    ckpt: VALID_CKPT,
+    dataset_config: dict[str, Any] | os.PathLike,
+    date: str | tuple[int, int, int],
+    lead_time: Any,
+    *,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    **kwargs,
+) -> fluent.Action:
+    """
+    Run an anemoi inference model after creating a dataset from a recipe.
+
+    NOTE: This will create a dataset in the current working directory
+    and will not delete it after the run. #TODO Fix.
+
+    Parameters
+    ----------
+    ckpt : VALID_CKPT
+        Checkpoint to load
+    dataset_config : dict[str, Any] | os.PathLike
+        Dataset Configuration to use
+    date : str | tuple[int, int, int]
+        Date to get initial conditions for
+    lead_time : Any
+        Lead time to run out to. Can be a string,
+        i.e. `1H`, `1D`, int, or a datetime.timedelta
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
+        Number of ensemble members to run, by default 1
+    kwargs : dict
+        Additional arguments to pass to the runner
+
+    Returns
+    -------
+    tuple[fluent.Action]
+        earthkit.workflows actions of the dataset, and then model.
+        Execute in order.
+
+    Examples
+    -------
+    >>> from anemoi.cascade.fluent import from_dataset
+    >>> from_dataset("anemoi_model.ckpt", "dataset_recipe.yaml", date = "2021-01-01T00:00:00", lead_time = "10D")
+    """
+    import tempfile
+
+    import yaml
+
+    if not isinstance(dataset_config, os.PathLike):
+        dataset_config = yaml.load(open(dataset_config))
+
+    checkpoint = Checkpoint(ckpt)
+
+    dates = [_parse_date(date) + checkpoint.lagged]
+    end_date = max(dates)
+    start_date = min(dates)
+    frequency = checkpoint.timestep
+
+    dataset_config["dates"] = {
+        "start": start_date.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end": end_date.strftime("%Y-%m-%dT%H:%M:%S"),
+        "frequency": frequency,
+    }
+
+    temp_config_file = tempfile.NamedTemporaryFile(suffix=".yaml")
+    yaml.dump(dataset_config, open(temp_config_file.name, "w"))
+
+    dataset_action = create_dataset(temp_config_file.name, f"dataset-{date}-for_inference.zarr", overwrite=True)
+
+    dataset_input = {"input": "dataset", "path": f"dataset-{date}-for_inference.zarr"}
+
+    config = RunConfiguration(checkpoint=str(ckpt), input=dataset_input, **kwargs)
+
+    runner = CascadeRunner(config)
+    runner.checkpoint.validate_environment(on_difference="warn")
+
+    input_state_source = get_initial_conditions_source(date=date, ensemble_members=ensemble_members, config=config)
+
+    return (dataset_action, run_model(runner, config, input_state_source, lead_time))
 
 
 class Action(fluent.Action):
@@ -354,5 +458,6 @@ __all__ = [
     "from_config",
     "from_input",
     "from_initial_conditions",
+    "create_dataset",
     "Action",
 ]
