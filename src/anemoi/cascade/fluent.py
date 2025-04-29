@@ -37,6 +37,7 @@ from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
 if TYPE_CHECKING:
     from anemoi.cascade.types import DATE
     from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from anemoi.cascade.types import ENVIRONMENT
     from anemoi.cascade.types import LEAD_TIME
     from anemoi.cascade.types import VALID_CKPT
 
@@ -65,13 +66,25 @@ def _parse_checkpoint(ckpt: VALID_CKPT) -> str | dict[str, Any]:
         raise TypeError(f"Invalid type for checkpoint: {type(ckpt)}. Must be os.PathLike or dict.")
 
 
+def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, list[str]]:
+    """Crack the environment into a dictionary of lists."""
+    if environment is None:
+        return {k: [] for k in keys}
+    elif isinstance(environment, list):
+        return {k: environment for k in keys}
+    elif isinstance(environment, dict):
+        return {k: environment.get(k, []) for k in keys}
+    else:
+        raise TypeError(f"Invalid type for environment: {type(environment)}. Must be list or dict.")
+
+
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
     overrides: Optional[dict[str, Any]] = None,
     *,
     date: Optional[DATE] = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
-    environment: Optional[list[str]] = None,
+    environment: ENVIRONMENT = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -87,11 +100,13 @@ def from_config(
         Specific override for date, by default None
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
         Number of ensemble members to run, by default 1
-    environment : Optional[list[str]], optional
+    environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+        Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
+        to set the environment for each part of the run.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -105,7 +120,7 @@ def from_config(
     >>> from anemoi.cascade.fluent import from_config
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
-    environment = environment or []
+    environment = _crack_environment(environment, ["inference", "initial_conditions"])
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
@@ -127,7 +142,7 @@ def from_config(
         config=configuration,  # type: ignore
         date=date or configuration.date,
         ensemble_members=ensemble_members,
-        payload_metadata={"environment": environment},
+        payload_metadata={"environment": environment["initial_conditions"]},
     )
 
     return run_model(
@@ -135,7 +150,7 @@ def from_config(
         configuration,
         input_state_source,
         configuration.lead_time,
-        payload_metadata={"environment": environment},
+        payload_metadata={"environment": environment["inference"]},
     )
 
 
@@ -171,6 +186,8 @@ def from_input(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+        Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
+        to set the environment for each part of the run.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -185,16 +202,21 @@ def from_input(
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), input=input, **kwargs)
-    environment = environment or []
+    environment = _crack_environment(environment, ["inference", "initial_conditions"])
 
     runner = CascadeRunner(config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input_state_source = get_initial_conditions_source(
-        date=date, ensemble_members=ensemble_members, config=config, payload_metadata={"environment": environment}
+        date=date,
+        ensemble_members=ensemble_members,
+        config=config,
+        payload_metadata={"environment": environment["initial_conditions"]},
     )
 
-    return run_model(runner, config, input_state_source, lead_time, payload_metadata={"environment": environment})
+    return run_model(
+        runner, config, input_state_source, lead_time, payload_metadata={"environment": environment["inference"]}
+    )
 
 
 def from_initial_conditions(
@@ -236,6 +258,8 @@ def from_initial_conditions(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+        Can be dict[str, list[str]] with keys `inference`
+        to set the environment for each part of the run.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -252,7 +276,7 @@ def from_initial_conditions(
 
     config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), **(configuration_kwargs or {}))
     runner = CascadeRunner(config, **kwargs)
-    environment = environment or []
+    environment = _crack_environment(environment, ["inference"])
 
     runner.checkpoint.validate_environment(on_difference="warn")
 
@@ -279,7 +303,9 @@ def from_initial_conditions(
             list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
             (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
         )
-    return run_model(runner, config, ens_initial_conditions, lead_time, payload_metadata={"environment": environment})
+    return run_model(
+        runner, config, ens_initial_conditions, lead_time, payload_metadata={"environment": environment["inference"]}
+    )
 
 
 def create_dataset(
@@ -312,7 +338,7 @@ def create_dataset(
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
-        e.g. `["anemoi-models==0.3.1"]`
+        e.g. `["anemoi-datasets==0.3.1"]`
 
     Returns
     -------
@@ -458,6 +484,8 @@ def from_dataset(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+        Can be dict[str, list[str]] with keys `inference`, `initial_conditions`, and `dataset`
+        to set the environment for each part of the run.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -499,8 +527,7 @@ def from_dataset(
     runner = CascadeRunner(runner_config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    dataset_environment = environment or [] if not isinstance(environment, dict) else environment.get("dataset", [])
-    inference_environment = environment or [] if not isinstance(environment, dict) else environment.get("inference", [])
+    environment = _crack_environment(environment, ["inference", "dataset", "initial_conditions"])
 
     def construct_configuration(dataset_location: str):
         """Create configuration from dataset location"""
@@ -532,7 +559,7 @@ def from_dataset(
         f"dataset-{date}-for_inference.zarr",
         overwrite=True,
         number_of_tasks=number_of_dataset_tasks,
-        environment=dataset_environment,
+        environment=environment["dataset"],
     )
     init_conditions_config = dataset_action.map(
         fluent.Payload(construct_configuration, args=(fluent.Node.input_name(0),))
@@ -542,10 +569,10 @@ def from_dataset(
         config=init_conditions_config,
         date=date,
         ensemble_members=ensemble_members,
-        payload_metadata={"environment": inference_environment},
+        payload_metadata={"environment": environment["initial_conditions"]},
     )
     return run_model(
-        runner, runner_config, input_state_source, lead_time, payload_metadata={"environment": inference_environment}
+        runner, runner_config, input_state_source, lead_time, payload_metadata={"environment": environment["inference"]}
     )
 
 

@@ -10,12 +10,14 @@
 import datetime
 import os
 from typing import Any
+from typing import Optional
 from typing import Sequence
 from typing import Union
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
 LEAD_TIME = Union[int, str, datetime.timedelta]
 DATE = Union[datetime.datetime, tuple[int, int, int], str]
+ENVIRONMENT = Optional[Union[dict[str, list[str]], list[str]]]
 
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
 ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"
