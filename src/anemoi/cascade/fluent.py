@@ -422,6 +422,7 @@ def from_dataset(
     lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    input_template: Optional[dict[str, Any]] = None,
     number_of_dataset_tasks: Optional[int] = None,
     environment: Optional[list[str] | dict[Literal["inference", "dataset"], list[str]]] = None,
     **kwargs,
@@ -445,6 +446,10 @@ def from_dataset(
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to run, by default 1
+    input_template : Optional[dict[str, Any]], optional
+        Template of input to use for inference, by default None
+        Use "%DATASET_PATH%" to mark where the dataset path should be inserted
+        Default is {"dataset": "%DATASET_PATH%"}
     number_of_dataset_tasks : Optional[int], optional
         Number of tasks to run in parallel, by default None
         If None, will use a heurisitic based on date groups
@@ -499,7 +504,22 @@ def from_dataset(
 
     def construct_configuration(dataset_location: str):
         """Create configuration from dataset location"""
-        dataset_input = {"dataset": dataset_location}
+
+        def insert_dataset_path(template: dict[str, Any] | list[str] | str) -> dict[str, Any] | list[str] | str:
+            """Insert the dataset path into the template"""
+            if isinstance(template, dict):
+                return {k: insert_dataset_path(v) for k, v in template.items()}
+            elif isinstance(template, list):
+                return [insert_dataset_path(v) for v in template]
+            elif isinstance(template, str):
+                if "%DATASET_PATH%" in template:
+                    return template.replace("%DATASET_PATH%", dataset_location)
+                else:
+                    return template
+            return template
+
+        dataset_input = insert_dataset_path(input_template or {"dataset": "%DATASET_PATH%"})
+
         config = RunConfiguration(
             checkpoint=_parse_checkpoint(ckpt),
             input=dataset_input,
