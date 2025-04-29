@@ -14,8 +14,10 @@ import functools
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generator
+from typing import Optional
 
 from anemoi.inference.config.run import RunConfiguration
+from anemoi.inference.types import State
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.grib import shortname_to_paramid
@@ -23,6 +25,7 @@ from earthkit.data import ArrayField
 from earthkit.data import FieldList
 from earthkit.data import SimpleFieldList
 from earthkit.workflows import fluent
+from earthkit.workflows import mark
 
 from anemoi.cascade.runner import CascadeRunner
 from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
@@ -32,10 +35,12 @@ if TYPE_CHECKING:
     from anemoi.inference.input import Input
     from anemoi.transform.variables import Variable
 
+    from anemoi.cascade.types import DATE
     from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from anemoi.cascade.types import LEAD_TIME
 
 
-def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetime.datetime:
+def _parse_date(date: DATE) -> datetime.datetime:
     """Parse date from string or tuple"""
     if isinstance(date, datetime.datetime):
         return date
@@ -45,7 +50,7 @@ def _parse_date(date: str | tuple[int, int, int] | datetime.datetime) -> datetim
         return datetime.datetime(*date)
 
 
-def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> Any:
+def _get_initial_conditions(input: Input, date: DATE) -> State:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date=_parse_date(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
@@ -54,14 +59,14 @@ def _get_initial_conditions(input: Input, date: str | tuple[int, int, int]) -> A
     return input_state
 
 
-def _get_initial_conditions_from_config(config: dict[str, Any], date: str | tuple[int, int, int]) -> Any:
+def _get_initial_conditions_from_config(config: dict[str, Any], date: DATE) -> State:
     """Get initial conditions for the model"""
     runner = CascadeRunner(config)
     input = runner.create_input()
     return _get_initial_conditions(input, date)
 
 
-def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], ens_mem: int) -> Any:
+def _get_initial_conditions_ens(input: Input, ens_mem: int, date: DATE) -> State:
     """Get initial conditions for the model"""
     from anemoi.inference.inputs.mars import MarsInput
 
@@ -77,15 +82,17 @@ def _get_initial_conditions_ens(input: Input, date: str | tuple[int, int, int], 
 
 
 def _get_initial_conditions_ens_from_config(
-    config: dict[str, Any], date: str | tuple[int, int, int], ens_mem: int
-) -> Any:
+    config: dict[str, Any],
+    ens_mem: int,
+    date: DATE,
+) -> State:
     """Get initial conditions for the model"""
     runner = CascadeRunner(config)
     input = runner.create_input()
     return _get_initial_conditions_ens(input, date, ens_mem)
 
 
-def _transform_fake(act: fluent.Action, ens_num: int):
+def _transform_fake(act: fluent.Action, ens_num: int) -> fluent.Action:
     """Transform the action to simulate ensemble members"""
 
     def _empty_payload(x, ens_mem: int):
@@ -106,19 +113,21 @@ def parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> l
 
 
 def get_initial_conditions_source(
-    config: RunConfiguration,
-    date: str | tuple[int, int, int],
+    config: RunConfiguration | fluent.Action,
+    date: DATE,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     *,
     initial_condition_perturbation: bool = False,
+    payload_metadata: Optional[dict[str, Any]] = None,
 ) -> fluent.Action:
     """
     Get the initial conditions for the model
 
     Parameters
     ----------
-    config : RunConfiguration
-        Configuration object, must contain checkpoint and input
+    config : RunConfiguration | fluent.Action
+        Configuration object, must contain checkpoint and input.
+        If is a fluent action, the action must return the RunConfiguration object.
     date : str | tuple[int, int, int]
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
@@ -127,7 +136,8 @@ def get_initial_conditions_source(
         Whether to get perturbed initial conditions, by default False
         If False, only one initial condition is returned, and
         the ensemble members are simulated by wrapping the action.
-
+    payload_metadata : Optional[dict[str, Any]], optional
+        Metadata to add to the payload, by default None
     Returns
     -------
     fluent.Action
@@ -135,12 +145,30 @@ def get_initial_conditions_source(
     """
     ensemble_members = parse_ensemble_members(ensemble_members)
     if initial_condition_perturbation:
+        if isinstance(config, fluent.Action):
+            init_conditions = config.transform(
+                lambda x, *a: x.map(
+                    fluent.Payload(
+                        _get_initial_conditions_ens_from_config,
+                        args=(fluent.Node.input_name(0), *a),
+                        kwargs=dict(date=date),
+                        metadata=payload_metadata,
+                    )
+                ),
+                params=ensemble_members,
+                dim=(ENSEMBLE_DIMENSION_NAME, ensemble_members),
+            )
+            init_conditions._add_dimension("date", [_parse_date(date)])
+            return init_conditions
+
         return fluent.from_source(
             [
                 [
                     # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
                     fluent.Payload(
-                        _get_initial_conditions_ens_from_config, kwargs=dict(config=config, date=date, ens_mem=ens_mem)
+                        _get_initial_conditions_ens_from_config,
+                        kwargs=dict(config=config, date=date, ens_mem=ens_mem),
+                        metadata=payload_metadata,
                     )
                     for ens_mem in ensemble_members
                 ],
@@ -148,14 +176,26 @@ def get_initial_conditions_source(
             coords={"date": [_parse_date(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
         )
 
-    # init_condition = fluent.Payload(_get_initial_conditions, kwargs=dict(input=input, date=date))
-    init_condition = fluent.Payload(_get_initial_conditions_from_config, kwargs=dict(config=config, date=date))
-    single_init = fluent.from_source(
-        [
-            init_condition,
-        ],  # type: ignore
-        coords={"date": [_parse_date(date)]},
-    )
+    if isinstance(config, fluent.Action):
+        init_condition = fluent.Payload(
+            _get_initial_conditions_from_config,
+            args=(fluent.Node.input_name(0),),
+            kwargs=dict(date=date),
+            metadata=payload_metadata,
+        )
+        single_init = config.map(init_condition)
+        single_init._add_dimension("date", [_parse_date(date)])
+    else:
+        init_condition = fluent.Payload(
+            _get_initial_conditions_from_config, kwargs=dict(config=config, date=date), metadata=payload_metadata
+        )
+        single_init = fluent.from_source(
+            [
+                init_condition,
+            ],  # type: ignore
+            coords={"date": [_parse_date(date)]},
+        )
+
     # Wrap with empty payload to simulate ensemble members
     expanded_init = single_init.transform(
         _transform_fake,
@@ -167,15 +207,17 @@ def get_initial_conditions_source(
     return expanded_init
 
 
-def _time_range(start, end, step):
+def _time_range(
+    start: datetime.datetime, end: datetime.datetime, step: datetime.timedelta
+) -> Generator[datetime.datetime, None, None]:
     """Get a range of timedeltas"""
     while start < end:
         yield start
         start += step
 
 
-def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = False) -> fluent.Action:
-    """Expand model results to the correct dimensions"""
+def _expand(runner: CascadeRunner, model_results: fluent.Action) -> fluent.Action:
+    """Expand model results into the parameter dimension"""
 
     # Expand by variable
     variables = [*runner.checkpoint.diagnostic_variables, *runner.checkpoint.prognostic_variables]
@@ -184,7 +226,7 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = F
     surface_vars = [var for var in variables if "_" not in var]
 
     pressure_vars_complete = [var for var in variables if "_" in var]
-    pressure_vars = list(set(var.split("_")[0] for var in variables if "_" in var))
+    # pressure_vars = list(set(var.split("_")[0] for var in variables if "_" in var))
     # pressure_levels = list(set(var.split('_')[1] for var in variables if "_" in var))
 
     surface_expansion = None
@@ -194,11 +236,11 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = F
         )
 
     pressure_expansion = None
-    if pressure_vars:
+    if pressure_vars_complete:
         pressure_expansion = model_results.expand(
             ("param", pressure_vars_complete),
             ("param", pressure_vars_complete),
-            backend_kwargs=dict(method="sel", remapping={"param": "{param}_{level}" if remap else None}),
+            backend_kwargs=dict(method="sel", remapping={"param": "{param}_{level}"}),
         )
         # pressure_expansion = model_results.expand(
         #     ("param", pressure_vars), ("param", pressure_vars), backend_kwargs=dict(method="sel")
@@ -218,10 +260,15 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action, remap: bool = F
 
 
 def run_model(
-    runner: CascadeRunner, config: RunConfiguration, input_state_source: fluent.Action, lead_time: Any, **kwargs
+    runner: CascadeRunner,
+    config: RunConfiguration,
+    input_state_source: fluent.Action,
+    lead_time: LEAD_TIME,
+    payload_metadata: Optional[dict[str, Any]] = None,
+    **kwargs,
 ) -> fluent.Action:
     """
-    Run the model, expanding the results to the correct dimensions
+    Run the model, expanding the results to the correct dimensions.
 
     Parameters
     ----------
@@ -231,9 +278,11 @@ def run_model(
         Configuration object
     input_state_source : fluent.Action
         Fluent action of initial conditions
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
+    payload_metadata : Optional[dict[str, Any]], optional
+        Metadata to add to the payload, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -248,6 +297,7 @@ def run_model(
         run_as_earthkit_from_config,
         args=(fluent.Node.input_name(0),),
         kwargs=dict(config=config, lead_time=lead_time, **kwargs),
+        metadata=payload_metadata,
     )
 
     model_step = runner.checkpoint.timestep
@@ -257,10 +307,11 @@ def run_model(
 
     model_results = input_state_source.map(model_payload, yields=("step", steps))
 
-    return _expand(runner, model_results, lead_time)
+    return _expand(runner, model_results)
 
 
 def paramId_to_units(paramId: int) -> str:
+    """Get the units for a given paramId."""
     from eccodes import codes_get
     from eccodes import codes_grib_new_from_samples
     from eccodes import codes_release
@@ -274,9 +325,9 @@ def paramId_to_units(paramId: int) -> str:
     return units
 
 
-def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[Any, None, None]:
+def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Generator[Any, None, None]:
     """
-    Run the model
+    Run the model.
 
     Parameters
     ----------
@@ -284,7 +335,7 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[A
         Initial conditions for the model
     runner : CascadeRunner
         CascadeRunner object
-    lead_time : int
+    lead_time : LEAD_TIME
         Lead time for the model
 
     Returns
@@ -295,8 +346,9 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: int) -> Generator[A
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
 
+@mark.needs_gpu
 def run_as_earthkit(
-    input_state: dict, runner: CascadeRunner, lead_time: Any, extra_metadata: dict[str, Any] = None
+    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
 ) -> Generator[SimpleFieldList, None, None]:
     """
     Run the model and yield the results as earthkit FieldList
@@ -307,7 +359,7 @@ def run_as_earthkit(
         Initial Conditions for the model
     runner : CascadeRunner
         CascadeRunner Object
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time for the model
     extra_metadata: dict[str, Any], optional
         Extra metadata to add to the fields, by default None
@@ -366,16 +418,18 @@ def run_as_earthkit(
 
 
 @functools.wraps(run_as_earthkit)
+@mark.needs_gpu
 def run_as_earthkit_from_config(
-    input_state: dict, config: Configuration, lead_time: Any, extra_metadata: dict[str, Any] = None
+    input_state: dict, config: Configuration, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
 ) -> Generator[SimpleFieldList, None, None]:
     """Run from config"""
     runner = CascadeRunner(config)
     yield from run_as_earthkit(input_state, runner, lead_time, extra_metadata)
 
 
+@mark.needs_gpu
 def collect_as_earthkit(
-    input_state: dict, runner: CascadeRunner, lead_time: Any, extra_metadata: dict[str, Any] = None
+    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
 ) -> SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
@@ -386,7 +440,7 @@ def collect_as_earthkit(
         Initial conditions for the model
     runner : CascadeRunner
         CascadeRunner object
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time for the model
     extra_metadata: dict[str, Any], optional
         Extra metadata to add to the fields, by default None
@@ -404,6 +458,7 @@ def collect_as_earthkit(
 
 
 @functools.wraps(collect_as_earthkit)
+@mark.needs_gpu
 def collect_as_earthkit_from_config(
     input_state: dict, config: Configuration, lead_time: Any, extra_metadata: dict[str, Any] = None
 ) -> SimpleFieldList:

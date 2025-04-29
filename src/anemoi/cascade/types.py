@@ -7,11 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import os
 from typing import Any
 from typing import Sequence
 from typing import Union
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
+LEAD_TIME = Union[int, str, datetime.timedelta]
+DATE = Union[datetime.datetime, tuple[int, int, int], str]
+
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
 ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"

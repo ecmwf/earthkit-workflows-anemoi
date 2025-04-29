@@ -18,9 +18,12 @@ import os
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
+from typing import Literal
+from typing import Optional
 
 from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
+from anemoi.inference.types import State
 from earthkit.workflows import fluent
 
 from anemoi.cascade.inference import _parse_date
@@ -32,18 +35,43 @@ from anemoi.cascade.runner import CascadeRunner
 from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
+    from anemoi.cascade.types import DATE
     from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from anemoi.cascade.types import LEAD_TIME
     from anemoi.cascade.types import VALID_CKPT
 
 LOG = logging.getLogger(__name__)
 
 
+def _parse_checkpoint(ckpt: VALID_CKPT) -> str | dict[str, Any]:
+    """
+    Parse the checkpoint to a string or dictionary.
+
+    Parameters
+    ----------
+    ckpt : VALID_CKPT
+        Checkpoint to parse
+
+    Returns
+    -------
+    str | dict[str, Any]
+        Parsed checkpoint
+    """
+    if isinstance(ckpt, os.PathLike):
+        return str(ckpt)
+    elif isinstance(ckpt, dict):
+        return ckpt
+    else:
+        raise TypeError(f"Invalid type for checkpoint: {type(ckpt)}. Must be os.PathLike or dict.")
+
+
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
-    overrides: dict[str, Any] | None = None,
+    overrides: Optional[dict[str, Any]] = None,
     *,
-    date: str | tuple[int, int, int] | None = None,
+    date: Optional[DATE] = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    environment: Optional[list[str]] = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -53,12 +81,17 @@ def from_config(
     ----------
     config : os.PathLike | dict[str, Any]
         Path to the configuration file, or dictionary of configuration
-    overrides : dict[str, Any], optional
+    overrides : Optional[dict[str, Any]], optional
         Override for the config, by default None
-    date : str | tuple[int, int, int], optional
+    date : Optional[DATE], optional
         Specific override for date, by default None
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
         Number of ensemble members to run, by default 1
+    environment : Optional[list[str]], optional
+        Environment to run the model in, by default None
+        If None, will use the current environment
+        Should be set to strings, as if used in pip install,
+        e.g. `["anemoi-models==0.3.1"]`
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -72,7 +105,7 @@ def from_config(
     >>> from anemoi.cascade.fluent import from_config
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
-
+    environment = environment or []
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
@@ -94,18 +127,26 @@ def from_config(
         config=configuration,  # type: ignore
         date=date or configuration.date,
         ensemble_members=ensemble_members,
+        payload_metadata={"environment": environment},
     )
 
-    return run_model(runner, configuration, input_state_source, configuration.lead_time)
+    return run_model(
+        runner,
+        configuration,
+        input_state_source,
+        configuration.lead_time,
+        payload_metadata={"environment": environment},
+    )
 
 
 def from_input(
     ckpt: VALID_CKPT,
     input: str | dict[str, Any],
-    date: str | tuple[int, int, int],
-    lead_time: Any,
+    date: DATE,
+    lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    environment: Optional[list[str]] = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -118,13 +159,18 @@ def from_input(
     input : str | dict[str, Any]
         `anemoi.inference` input source.
         Can be `mars`, `grib`, etc or a dictionary of input configuration,
-    date : str | tuple[int, int, int]
+    date : DATE
         Date to get initial conditions for
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to run, by default 1
+    environment : Optional[list[str]], optional
+        Environment to run the model in, by default None
+        If None, will use the current environment
+        Should be set to strings, as if used in pip install,
+        e.g. `["anemoi-models==0.3.1"]`
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -138,23 +184,27 @@ def from_input(
     >>> from anemoi.cascade.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
-    config = RunConfiguration(checkpoint=str(ckpt), input=input, **kwargs)
+    config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), input=input, **kwargs)
+    environment = environment or []
 
     runner = CascadeRunner(config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    input_state_source = get_initial_conditions_source(date=date, ensemble_members=ensemble_members, config=config)
+    input_state_source = get_initial_conditions_source(
+        date=date, ensemble_members=ensemble_members, config=config, payload_metadata={"environment": environment}
+    )
 
-    return run_model(runner, config, input_state_source, lead_time)
+    return run_model(runner, config, input_state_source, lead_time, payload_metadata={"environment": environment})
 
 
 def from_initial_conditions(
     ckpt: VALID_CKPT,
-    initial_conditions: dict[str, Any] | fluent.Action | fluent.Payload | Callable,
-    lead_time: Any,
-    configuration_kwargs: dict[str, Any] | None = None,
+    initial_conditions: State | fluent.Action | fluent.Payload | Callable,
+    lead_time: LEAD_TIME,
+    configuration_kwargs: Optional[dict[str, Any]] = None,
     *,
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
+    ensemble_members: Optional[ENSEMBLE_MEMBER_SPECIFICATION] = None,
+    environment: Optional[list[str]] = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -164,23 +214,28 @@ def from_initial_conditions(
     ----------
     ckpt : VALID_CKPT
         Checkpoint to load
-    initial_conditions : FieldList | fluent.Action | fluent.Payload | Callable
+    initial_conditions : State | fluent.Action | fluent.Payload | Callable
         Initial conditions for the model
-        Can be other fluent actions, payloads, or a callable, or a FieldList
+        Can be other fluent actions, payloads, or a callable, or a State.
         If a fluent action and multiple ensemble member initial conditions
         are included, the dimension must be named `ensemble_member`.
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     configuration_kwargs: dict[str, Any]:
         kwargs for `anemoi.inference` configuration
-    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
+    ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
         Number of ensemble members to run,
         If initial_conditions is a fluent action, with
         multiple ensemble members, this argument can be set to None,
         and the number of ensemble members will be inferred from the action.
         If not set, the number of ensemble members will default to 1.
         by default None.
+    environment : Optional[list[str]], optional
+        Environment to run the model in, by default None
+        If None, will use the current environment
+        Should be set to strings, as if used in pip install,
+        e.g. `["anemoi-models==0.3.1"]`
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -195,8 +250,9 @@ def from_initial_conditions(
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
 
-    config = RunConfiguration(checkpoint=str(ckpt), **(configuration_kwargs or {}))
+    config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), **(configuration_kwargs or {}))
     runner = CascadeRunner(config, **kwargs)
+    environment = environment or []
 
     runner.checkpoint.validate_environment(on_difference="warn")
 
@@ -223,16 +279,17 @@ def from_initial_conditions(
             list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
             (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
         )
-    return run_model(runner, config, ens_initial_conditions, lead_time)
+    return run_model(runner, config, ens_initial_conditions, lead_time, payload_metadata={"environment": environment})
 
 
 def create_dataset(
     config: dict[str, Any] | os.PathLike,
     path: os.PathLike,
     *,
-    number_of_tasks: int = None,
+    number_of_tasks: Optional[int] = None,
     overwrite: bool = False,
     test: bool = False,
+    environment: Optional[list[str]] = None,
 ) -> fluent.Action:
     """
     Create an anemoi dataset from a configuration.
@@ -243,7 +300,7 @@ def create_dataset(
         Configuration to use
     path : os.PathLike
         Path to save the dataset to
-    number_of_tasks : int, optional
+    number_of_tasks : Optional[int], optional
         Number of tasks to run in parallel, by default None
         If None, will use a heurisitic based on date groups
     overwrite : bool, optional
@@ -251,6 +308,11 @@ def create_dataset(
     test : bool, optional
         Build a small dataset, using only the first dates. And, when possible, using low resolution and less ensemble members,
         by default False
+    environment : Optional[list[str]], optional
+        Environment to run the model in, by default None
+        If None, will use the current environment
+        Should be set to strings, as if used in pip install,
+        e.g. `["anemoi-models==0.3.1"]`
 
     Returns
     -------
@@ -286,14 +348,16 @@ def create_dataset(
         groups = Groups(**loader_config(config_dict.copy()).dates)
         number_of_tasks = len(groups) * 25
 
-    options = {"config": config_path, "path": os.path.abspath(path), "overwrite": overwrite, "test": test}
+    path = os.path.abspath(path)
+    options = {"config": config_path, "path": path, "overwrite": overwrite, "test": test}
+    payload_metadata = {"environment": environment or []}
 
     def get_parallel_options(part: int):
         opt = options.copy()
         opt["parts"] = f"{part+1}/{number_of_tasks}"
         return opt
 
-    def get_task(name: str, opt: dict[str, Any]) -> Callable[[], Any]:
+    def get_task(name: str, opt: dict[str, Any]) -> Callable[..., Any]:
         """Get anemoi-datasets task"""
 
         def wrapped_func(*prior):
@@ -306,11 +370,17 @@ def create_dataset(
             wrapped_func.__name__ = f"{name}"
         return wrapped_func
 
-    def apply_sequential_task(prior: fluent.Action, task_name: str, opt: dict[str, Any] | None = None) -> fluent.Action:
+    def get_payload(task: Callable[..., Any]) -> fluent.Payload:
+        """Get fluent payload"""
+        return fluent.Payload(task, metadata=payload_metadata)
+
+    def apply_sequential_task(
+        prior: fluent.Action, task_name: str, opt: Optional[dict[str, Any]] = None
+    ) -> fluent.Action:
         """Apply a task on each node in the graph"""
         if opt is None:
             opt = options.copy()
-        return prior.map(fluent.Payload(get_task(task_name, opt)))
+        return prior.map(get_payload(get_task(task_name, opt)))
 
     def apply_parallel_task(node: fluent.Action, task_name: str, dim: str) -> fluent.Action:
         """Apply a task in parallel creating a new dimension"""
@@ -325,9 +395,9 @@ def create_dataset(
 
     def apply_reduction_task(node: fluent.Action, task_name: str, dim: str) -> fluent.Action:
         """Apply a task which reduces the dimension"""
-        return node.reduce(fluent.Payload(get_task(task_name, options)), dim=dim)
+        return node.reduce(get_payload(get_task(task_name, options)), dim=dim)
 
-    init = fluent.from_source([fluent.Payload(get_task("init", options.copy()))], dims=["source"])
+    init = fluent.from_source([get_payload(get_task("init", options.copy()))], dims=["source"])
     loaded = apply_parallel_task(init, "load", dim="parts")
     finalised = apply_reduction_task(loaded, "finalise", dim="parts")
 
@@ -339,16 +409,21 @@ def create_dataset(
     cleanup = apply_sequential_task(patch, "cleanup")
     verify = apply_sequential_task(cleanup, "verify")
 
-    return verify
+    def get_path(_):
+        return path
+
+    return verify.map(get_path)
 
 
 def from_dataset(
     ckpt: VALID_CKPT,
     dataset_config: dict[str, Any] | os.PathLike,
-    date: str | tuple[int, int, int],
-    lead_time: Any,
+    date: DATE,
+    lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    number_of_dataset_tasks: Optional[int] = None,
+    environment: Optional[list[str] | dict[Literal["inference", "dataset"], list[str]]] = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -363,13 +438,21 @@ def from_dataset(
         Checkpoint to load
     dataset_config : dict[str, Any] | os.PathLike
         Dataset Configuration to use
-    date : str | tuple[int, int, int]
+    date : DATE
         Date to get initial conditions for
-    lead_time : Any
+    lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to run, by default 1
+    number_of_dataset_tasks : Optional[int], optional
+        Number of tasks to run in parallel, by default None
+        If None, will use a heurisitic based on date groups
+    environment : Optional[list[str] | dict[Literal['inference', 'dataset'], list[str]]], optional
+        Environment to run the model in, by default None
+        If None, will use the current environment
+        Should be set to strings, as if used in pip install,
+        e.g. `["anemoi-models==0.3.1"]`
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -389,11 +472,11 @@ def from_dataset(
     import yaml
 
     if not isinstance(dataset_config, os.PathLike):
-        dataset_config = yaml.load(open(dataset_config))
+        dataset_config = yaml.safe_load(open(dataset_config))
 
-    checkpoint = Checkpoint(ckpt)
+    checkpoint = Checkpoint(_parse_checkpoint(ckpt))
 
-    dates = [_parse_date(date) + checkpoint.lagged]
+    dates = list(map(lambda x: _parse_date(date) + x, checkpoint.lagged))
     end_date = max(dates)
     start_date = min(dates)
     frequency = checkpoint.timestep
@@ -401,44 +484,78 @@ def from_dataset(
     dataset_config["dates"] = {
         "start": start_date.strftime("%Y-%m-%dT%H:%M:%S"),
         "end": end_date.strftime("%Y-%m-%dT%H:%M:%S"),
-        "frequency": frequency,
+        "frequency": str(frequency),
     }
 
-    temp_config_file = tempfile.NamedTemporaryFile(suffix=".yaml")
+    temp_config_file = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False)
     yaml.dump(dataset_config, open(temp_config_file.name, "w"))
 
-    dataset_action = create_dataset(temp_config_file.name, f"dataset-{date}-for_inference.zarr", overwrite=True)
-
-    dataset_input = {"input": "dataset", "path": f"dataset-{date}-for_inference.zarr"}
-
-    config = RunConfiguration(checkpoint=str(ckpt), input=dataset_input, **kwargs)
-
-    runner = CascadeRunner(config)
+    runner_config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), input="dummy", **kwargs)
+    runner = CascadeRunner(runner_config)
     runner.checkpoint.validate_environment(on_difference="warn")
 
-    input_state_source = get_initial_conditions_source(date=date, ensemble_members=ensemble_members, config=config)
+    dataset_environment = environment or [] if not isinstance(environment, dict) else environment.get("dataset", [])
+    inference_environment = environment or [] if not isinstance(environment, dict) else environment.get("inference", [])
 
-    return (dataset_action, run_model(runner, config, input_state_source, lead_time))
+    def construct_configuration(dataset_location: str):
+        """Create configuration from dataset location"""
+        dataset_input = {"dataset": dataset_location}
+        config = RunConfiguration(
+            checkpoint=_parse_checkpoint(ckpt),
+            input=dataset_input,
+            **kwargs,
+        )
+        return config
+
+    dataset_action = create_dataset(
+        temp_config_file.name,
+        f"dataset-{date}-for_inference.zarr",
+        overwrite=True,
+        number_of_tasks=number_of_dataset_tasks,
+        environment=dataset_environment,
+    )
+    init_conditions_config = dataset_action.map(
+        fluent.Payload(construct_configuration, args=(fluent.Node.input_name(0),))
+    )
+
+    input_state_source = get_initial_conditions_source(
+        config=init_conditions_config,
+        date=date,
+        ensemble_members=ensemble_members,
+        payload_metadata={"environment": inference_environment},
+    )
+    return run_model(
+        runner, runner_config, input_state_source, lead_time, payload_metadata={"environment": inference_environment}
+    )
 
 
 class Action(fluent.Action):
 
     def infer(
-        self, ckpt: VALID_CKPT, lead_time: Any, configuration_kwargs: dict[str, Any] | None = None, **kwargs
+        self,
+        ckpt: VALID_CKPT,
+        lead_time: LEAD_TIME,
+        configuration_kwargs: Optional[dict[str, Any]] = None,
+        environment: list[str] = None,
+        **kwargs,
     ) -> fluent.Action:
         """
-        Map a model prediction to all nodes within
-        the graph, using them as initial conditions
+        Map a model prediction to all nodes within the graph, using them as initial conditions.
 
         Parameters
         ----------
         ckpt : VALID_CKPT
             Checkpoint to load
-        lead_time : Any
+        lead_time : LEAD_TIME
             Lead time to run out to. Can be a string,
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         configuration_kwargs: dict[str, Any]:
             kwargs for anemoi.inference configuration
+        environment : Optional[list[str]], optional
+            Environment to run the model in, by default None
+            If None, will use the current environment
+            Should be set to strings, as if used in pip install,
+            e.g. `["anemoi-models==0.3.1"]`
         kwargs : dict
             Additional arguments to pass to the runner
 
@@ -448,7 +565,9 @@ class Action(fluent.Action):
         fluent.Action
             Cascade action of the model results
         """
-        return from_initial_conditions(ckpt, self, lead_time, configuration_kwargs=configuration_kwargs, **kwargs)
+        return from_initial_conditions(
+            ckpt, self, lead_time, configuration_kwargs=configuration_kwargs, environment=environment, **kwargs
+        )
 
 
 fluent.Action.register("anemoi", Action)
@@ -459,5 +578,6 @@ __all__ = [
     "from_input",
     "from_initial_conditions",
     "create_dataset",
+    "from_dataset",
     "Action",
 ]
