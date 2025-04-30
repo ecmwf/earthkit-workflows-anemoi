@@ -32,7 +32,7 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-datasets>=0.5.21",
   "anemoi-inference>=0.5.3",
-  "earthkit-data>=0.13.9",
+  "earthkit-data @ git+https://github.com/ecmwf/earthkit-data",
   "earthkit-workflows @ git+https://github.com/ecmwf/earthkit-workflows",
 ]
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
