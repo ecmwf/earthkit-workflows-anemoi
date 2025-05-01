@@ -161,7 +161,7 @@ def from_input(
     lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
-    environment: Optional[list[str]] = None,
+    environment: ENVIRONMENT = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -181,7 +181,7 @@ def from_input(
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to run, by default 1
-    environment : Optional[list[str]], optional
+    environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
@@ -258,8 +258,6 @@ def from_initial_conditions(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
-        Can be dict[str, list[str]] with keys `inference`
-        to set the environment for each part of the run.
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -450,7 +448,7 @@ def from_dataset(
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     input_template: Optional[dict[str, Any]] = None,
     number_of_dataset_tasks: Optional[int] = None,
-    environment: Optional[list[str] | dict[Literal["inference", "dataset"], list[str]]] = None,
+    environment: ENVIRONMENT = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -479,7 +477,7 @@ def from_dataset(
     number_of_dataset_tasks : Optional[int], optional
         Number of tasks to run in parallel, by default None
         If None, will use a heurisitic based on date groups
-    environment : Optional[list[str] | dict[Literal['inference', 'dataset'], list[str]]], optional
+    environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
