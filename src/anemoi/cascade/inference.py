@@ -31,7 +31,6 @@ from anemoi.cascade.runner import CascadeRunner
 from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
-    from anemoi.inference.config import Configuration
     from anemoi.inference.input import Input
     from anemoi.transform.variables import Variable
 
@@ -369,6 +368,13 @@ def run_as_earthkit(
     Generator[SimpleFieldList, None, None]
         State of the model at each time step
     """
+    import os
+
+    if hasattr(runner.config, "env"):
+        # Set environment variables found in the configuration
+        for key, value in runner.config.env.items():
+            os.environ[key] = str(value)
+            
     initial_date: datetime.datetime = input_state["date"]
     ensemble_member = input_state.get("ensemble_member")
     extra_metadata = extra_metadata or {}
@@ -420,7 +426,7 @@ def run_as_earthkit(
 @functools.wraps(run_as_earthkit)
 @mark.needs_gpu
 def run_as_earthkit_from_config(
-    input_state: dict, config: Configuration, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
+    input_state: dict, config: RunConfiguration, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
 ) -> Generator[SimpleFieldList, None, None]:
     """Run from config"""
     runner = CascadeRunner(config)
@@ -460,7 +466,7 @@ def collect_as_earthkit(
 @functools.wraps(collect_as_earthkit)
 @mark.needs_gpu
 def collect_as_earthkit_from_config(
-    input_state: dict, config: Configuration, lead_time: Any, extra_metadata: dict[str, Any] = None
+    input_state: dict, config: RunConfiguration, lead_time: Any, extra_metadata: dict[str, Any] = None
 ) -> SimpleFieldList:
     """Run from config"""
     runner = CascadeRunner(config)

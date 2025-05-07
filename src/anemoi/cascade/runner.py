@@ -44,10 +44,6 @@ class CascadeRunner(Runner):
             # So we get the dot notation
             config = DotDict(config)
 
-        # Remove that when the Pydantic model is ready
-        if isinstance(config, BaseModel):
-            config = DotDict(config.model_dump())
-
         self.config = config
 
         default_init_args = dict(
