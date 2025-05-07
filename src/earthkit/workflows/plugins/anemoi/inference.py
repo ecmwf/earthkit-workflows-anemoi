@@ -24,19 +24,19 @@ from anemoi.utils.grib import shortname_to_paramid
 from earthkit.data import ArrayField
 from earthkit.data import FieldList
 from earthkit.data import SimpleFieldList
+
 from earthkit.workflows import fluent
 from earthkit.workflows import mark
-
-from anemoi.cascade.runner import CascadeRunner
-from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
+from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
+from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
     from anemoi.transform.variables import Variable
 
-    from anemoi.cascade.types import DATE
-    from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
-    from anemoi.cascade.types import LEAD_TIME
+    from earthkit.workflows.plugins.anemoi.types import DATE
+    from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from earthkit.workflows.plugins.anemoi.types import LEAD_TIME
 
 
 def _parse_date(date: DATE) -> datetime.datetime:
@@ -374,7 +374,7 @@ def run_as_earthkit(
         # Set environment variables found in the configuration
         for key, value in runner.config.env.items():
             os.environ[key] = str(value)
-            
+
     initial_date: datetime.datetime = input_state["date"]
     ensemble_member = input_state.get("ensemble_member")
     extra_metadata = extra_metadata or {}

@@ -14,9 +14,9 @@ import pytest
 from anemoi.inference.testing import fake_checkpoints
 from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
 
-from anemoi.cascade.inference import _get_initial_conditions_from_config
-from anemoi.cascade.inference import get_initial_conditions_source
-from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
+from earthkit.workflows.plugins.anemoi.inference import _get_initial_conditions_from_config
+from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
+from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 
 @pytest.fixture

@@ -18,28 +18,27 @@ import os
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
-from typing import Literal
 from typing import Optional
 
 from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.types import State
-from earthkit.workflows import fluent
 
-from anemoi.cascade.inference import _parse_date
-from anemoi.cascade.inference import _transform_fake
-from anemoi.cascade.inference import get_initial_conditions_source
-from anemoi.cascade.inference import parse_ensemble_members
-from anemoi.cascade.inference import run_model
-from anemoi.cascade.runner import CascadeRunner
-from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
+from earthkit.workflows import fluent
+from earthkit.workflows.plugins.anemoi.inference import _parse_date
+from earthkit.workflows.plugins.anemoi.inference import _transform_fake
+from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
+from earthkit.workflows.plugins.anemoi.inference import parse_ensemble_members
+from earthkit.workflows.plugins.anemoi.inference import run_model
+from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
+from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
-    from anemoi.cascade.types import DATE
-    from anemoi.cascade.types import ENSEMBLE_MEMBER_SPECIFICATION
-    from anemoi.cascade.types import ENVIRONMENT
-    from anemoi.cascade.types import LEAD_TIME
-    from anemoi.cascade.types import VALID_CKPT
+    from earthkit.workflows.plugins.anemoi.types import DATE
+    from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_MEMBER_SPECIFICATION
+    from earthkit.workflows.plugins.anemoi.types import ENVIRONMENT
+    from earthkit.workflows.plugins.anemoi.types import LEAD_TIME
+    from earthkit.workflows.plugins.anemoi.types import VALID_CKPT
 
 LOG = logging.getLogger(__name__)
 
@@ -117,7 +116,7 @@ def from_config(
 
     Examples
     --------
-    >>> from anemoi.cascade.fluent import from_config
+    >>> from earthkit.workflows.plugins.anemoi.fluent import from_config
     >>> from_config("config.yaml", date = "2021-01-01T00:00:00")
     """
     environment = _crack_environment(environment, ["inference", "initial_conditions"])
@@ -198,7 +197,7 @@ def from_input(
 
     Examples
     -------
-    >>> from anemoi.cascade.fluent import from_input
+    >>> from earthkit.workflows.plugins.anemoi.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), input=input, **kwargs)
@@ -268,7 +267,7 @@ def from_initial_conditions(
 
     Examples
     --------
-    >>> from anemoi.cascade.fluent import from_initial_conditions
+    >>> from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
 
@@ -345,7 +344,7 @@ def create_dataset(
 
     Examples
     --------
-    >>> from anemoi.cascade.fluent import create_dataset
+    >>> from earthkit.workflows.plugins.anemoi.fluent import create_dataset
     >>> create_dataset("dataset_recipe.yaml", "output_dir/dataset.zarr")
     """
     import yaml
@@ -495,7 +494,7 @@ def from_dataset(
 
     Examples
     -------
-    >>> from anemoi.cascade.fluent import from_dataset
+    >>> from earthkit.workflows.plugins.anemoi.fluent import from_dataset
     >>> from_dataset("anemoi_model.ckpt", "dataset_recipe.yaml", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     import tempfile

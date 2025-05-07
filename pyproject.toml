@@ -12,7 +12,7 @@
 requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
-name = "anemoi-cascade"
+name = "earthkit-workflows-anemoi"
 description = "An earthkit-workflows interface to anemoi inference"
 readme = "README.md"
 license = { text = "Apache License Version 2.0" }
@@ -45,7 +45,7 @@ zip-safe = false
 where = [ "src" ]
 
 [tool.setuptools_scm]
-version_file = "src/anemoi/cascade/_version.py"
+version_file = "src/earthkit/workflows/plugins/anemoi/_version.py"
 
 [tool.isort]
 profile = "black"

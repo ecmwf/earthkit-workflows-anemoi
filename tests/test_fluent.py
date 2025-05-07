@@ -14,11 +14,11 @@ import pytest
 from anemoi.inference.testing import fake_checkpoints
 from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
 
-from anemoi.cascade.fluent import Action
-from anemoi.cascade.fluent import from_config
-from anemoi.cascade.fluent import from_initial_conditions
-from anemoi.cascade.fluent import from_input
-from anemoi.cascade.types import ENSEMBLE_DIMENSION_NAME
+from earthkit.workflows.plugins.anemoi.fluent import Action
+from earthkit.workflows.plugins.anemoi.fluent import from_config
+from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
+from earthkit.workflows.plugins.anemoi.fluent import from_input
+from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 
 @pytest.fixture
