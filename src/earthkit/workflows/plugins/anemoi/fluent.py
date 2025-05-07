@@ -488,9 +488,8 @@ def from_dataset(
 
     Returns
     -------
-    tuple[fluent.Action]
+    fluent.Action
         earthkit.workflows actions of the dataset, and then model.
-        Execute in order.
 
     Examples
     -------
