@@ -30,7 +30,6 @@ from anemoi.inference.inputs import create_input
 from anemoi.inference.runner import Runner
 from anemoi.inference.types import IntArray
 from anemoi.utils.config import DotDict
-from pydantic import BaseModel
 
 LOG = logging.getLogger(__name__)
 
@@ -43,10 +42,6 @@ class CascadeRunner(Runner):
         if isinstance(config, dict):
             # So we get the dot notation
             config = DotDict(config)
-
-        # Remove that when the Pydantic model is ready
-        if isinstance(config, BaseModel):
-            config = DotDict(config.model_dump())
 
         self.config = config
 
@@ -198,53 +193,3 @@ class CascadeRunner(Runner):
         result = BoundaryForcings(self, input, variables, mask)
         LOG.info("Boundary forcing: %s", result)
         return [result]
-
-    # def create_pre_processors(self) -> List[Processor]:
-    #     """Create pre-processors.
-
-    #     Returns
-    #     -------
-    #     List[Processor]
-    #         The created pre-processors.
-    #     """
-    #     if self.config.post_processors is None:
-    #         self.config.post_processors = ["accumulate_from_start_of_forecast"]
-    #         warnings.warn(
-    #             """
-    #             No post_processors defined. Accumulations will be accumulated from the beginning of the forecast.
-
-    #             🚧🚧🚧 In a future release, the default will be to NOT accumulate from the beginning of the forecast. 🚧🚧🚧
-    #             Update your config if you wish to keep accumulating from the beginning.
-    #             https://github.com/ecmwf/anemoi-inference/issues/131
-    #             """,
-    #         )
-
-    #     if "accumulate_from_start_of_forecast" not in self.config.post_processors:
-    #         warnings.warn(
-    #             """
-    #             post_processors are defined but `accumulate_from_start_of_forecast` is not set."
-    #             🚧 Accumulations will NOT be accumulated from the beginning of the forecast. 🚧
-    #             """
-    #         )
-
-    #     result = []
-    #     for processor in self.config.pre_processors:
-    #         result.append(create_pre_processor(self, processor))
-
-    #     LOG.info("Pre processors: %s", result)
-    #     return result
-
-    # def create_post_processors(self) -> List[Processor]:
-    #     """Create post-processors.
-
-    #     Returns
-    #     -------
-    #     List[Processor]
-    #         The created post-processors.
-    #     """
-    #     result = []
-    #     for processor in self.config.post_processors:
-    #         result.append(create_post_processor(self, processor))
-
-    #     LOG.info("Post processors: %s", result)
-    #     return result

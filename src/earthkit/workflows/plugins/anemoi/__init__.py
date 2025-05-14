@@ -13,7 +13,8 @@ Provide a connection between anemoi and earthkit-workflows.
 Exposes the `fluent` API for running anemoi models in earthkit-workflows.
 """
 
-from anemoi.cascade import fluent
+from earthkit.workflows.plugins.anemoi import fluent
+from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 try:
     # NOTE: the `version.py` file must not be present in the git repository
@@ -23,4 +24,4 @@ except ImportError:  # pragma: no cover
     # Local copy or not installed with setuptools
     __version__ = "999"
 
-__all__ = ["fluent", "__version__"]
+__all__ = ["fluent", "ENSEMBLE_DIMENSION_NAME", "__version__"]

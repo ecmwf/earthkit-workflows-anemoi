@@ -12,8 +12,9 @@
 requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
 [project]
-name = "anemoi-cascade"
-description = "A Cascade interface to anemoi inference"
+name = "earthkit-workflows-anemoi"
+description = "An earthkit-workflows interface to anemoi inference"
+readme = "README.md"
 license = { text = "Apache License Version 2.0" }
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
@@ -21,7 +22,6 @@ authors = [
 requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -30,9 +30,10 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
-  "anemoi-inference>=0.5.0",
+  "anemoi-datasets>=0.5.21",
+  "anemoi-inference>=0.5.3",
+  "earthkit-data @ git+https://github.com/ecmwf/earthkit-data",
   "earthkit-workflows @ git+https://github.com/ecmwf/earthkit-workflows",
-  "earthkit-data>=0.13.6",
 ]
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
@@ -44,7 +45,7 @@ zip-safe = false
 where = [ "src" ]
 
 [tool.setuptools_scm]
-version_file = "src/anemoi/cascade/_version.py"
+version_file = "src/earthkit/workflows/plugins/anemoi/_version.py"
 
 [tool.isort]
 profile = "black"
