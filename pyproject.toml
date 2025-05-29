@@ -9,13 +9,14 @@
 # https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
 
 [build-system]
-requires = [ "setuptools>=60", "setuptools-scm>=8" ]
+requires = [ "setuptools>=65", "setuptools-scm>=8" ]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "earthkit-workflows-anemoi"
 description = "An earthkit-workflows interface to anemoi inference"
-readme = "README.md"
-license = { text = "Apache License Version 2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
@@ -27,13 +28,13 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
+readme = "README.md"
 dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-datasets>=0.5.21",
   "anemoi-inference>=0.5.3",
-  "earthkit-data @ git+https://github.com/ecmwf/earthkit-data",
-  "earthkit-workflows @ git+https://github.com/ecmwf/earthkit-workflows",
+  "earthkit-workflows",
 ]
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
@@ -45,7 +46,19 @@ zip-safe = false
 where = [ "src" ]
 
 [tool.setuptools_scm]
-version_file = "src/earthkit/workflows/plugins/anemoi/_version.py"
+write_to = "src/earthkit/workflows/plugins/anemoi/_version.py"
+write_to_template = '''# Do not change! Do not track in version control!
+__version__ = "{version}"
+'''
+local_scheme = "no-local-version"
 
 [tool.isort]
 profile = "black"
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+testpaths = ["tests/"]
+addopts = "-n8"
+
+
