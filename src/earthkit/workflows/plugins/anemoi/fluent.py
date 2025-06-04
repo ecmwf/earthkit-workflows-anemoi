@@ -90,18 +90,22 @@ def _add_self_to_environment(environment: E) -> E:
         version = '.'.join(version.split('.')[0:2])
 
     version = '.'.join(version.split('.')[:3])  # Ensure version is in x.y.z format
-    self_var = f"earthkit-workflows-anemoi~={version}"
 
-    if isinstance(environment, list):
-        if self_var not in environment:
-            environment.append(self_var)
-        return environment
+    package_name = "earthkit-workflows-anemoi"
+    self_var = f"{package_name}~={version}"
+
+    def add_self_to_list(env_list: list[str]) -> list[str]:
+        if any(str(e).startswith(package_name) for e in env_list):
+            # If the environment already contains the self variable, return it as is
+            return env_list
+        env_list.append(self_var)
+        return env_list
     
+    if isinstance(environment, list):
+        environment = add_self_to_list(environment)
     elif isinstance(environment, dict):
         for key in environment:
-            if self_var not in environment[key]:
-                environment[key].append(self_var)
-        return environment
+            environment[key] = add_self_to_list(environment[key])
     return environment
     
 def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, list[str]]:
