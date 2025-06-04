@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from typing import Any
 from typing import Callable
 from typing import Optional
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from earthkit.workflows.plugins.anemoi.types import VALID_CKPT
 
 LOG = logging.getLogger(__name__)
+E = TypeVar("ENVIRONMENT", bound=list[str] | dict[str, list[str]])
 
 
 def _parse_checkpoint(ckpt: VALID_CKPT) -> str | dict[str, Any]:
@@ -65,17 +66,54 @@ def _parse_checkpoint(ckpt: VALID_CKPT) -> str | dict[str, Any]:
         raise TypeError(f"Invalid type for checkpoint: {type(ckpt)}. Must be os.PathLike or dict.")
 
 
+def _add_self_to_environment(environment: E) -> E:
+    """
+    Add earthkit-workflows-anemoi to the environment list.
+
+    Parameters
+    ----------
+    environment : list[str] | dict[str, list[str]]
+        Environment list to self in place to 
+
+    Returns
+    -------
+    list[str] | dict[str, list[str]]
+        Environment list with self added
+    """
+
+    from earthkit.workflows.plugins.anemoi import __version__ as version
+
+    if version.split('.')[-1].startswith('dev'):
+        # If the version is a development version, we only take the first two parts
+        # to avoid issues with pip versioning.
+        # e.g. "0.3.1.dev0" -> "0.3"
+        version = '.'.join(version.split('.')[0:2])
+
+    version = '.'.join(version.split('.')[:3])  # Ensure version is in x.y.z format
+    self_var = f"earthkit-workflows-anemoi~={version}"
+
+    if isinstance(environment, list):
+        if self_var not in environment:
+            environment.append(self_var)
+        return environment
+    
+    elif isinstance(environment, dict):
+        for key in environment:
+            if self_var not in environment[key]:
+                environment[key].append(self_var)
+        return environment
+    return environment
+    
 def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, list[str]]:
     """Crack the environment into a dictionary of lists."""
     if environment is None:
-        return {k: [] for k in keys}
+        return _add_self_to_environment({k: [] for k in keys})
     elif isinstance(environment, list):
-        return {k: environment for k in keys}
+        return _add_self_to_environment({k: environment for k in keys})
     elif isinstance(environment, dict):
-        return {k: environment.get(k, []) for k in keys}
+        return _add_self_to_environment({k: environment.get(k, []) for k in keys})
     else:
         raise TypeError(f"Invalid type for environment: {type(environment)}. Must be list or dict.")
-
 
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
