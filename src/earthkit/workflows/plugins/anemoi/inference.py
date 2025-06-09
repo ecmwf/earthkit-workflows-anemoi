@@ -11,17 +11,22 @@ from __future__ import annotations
 
 import datetime
 import functools
+from io import BytesIO
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generator
 from typing import Optional
+import logging
 
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.types import State
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.grib import shortname_to_paramid
-from earthkit.data import ArrayField
+
+
+import earthkit.data as ekd
+from earthkit.data import ArrayField, Field
 from earthkit.data import FieldList
 from earthkit.data import SimpleFieldList
 
@@ -29,6 +34,8 @@ from earthkit.workflows import fluent
 from earthkit.workflows import mark
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
+
+from .output import GribOutput
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
@@ -38,6 +45,7 @@ if TYPE_CHECKING:
     from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_MEMBER_SPECIFICATION
     from earthkit.workflows.plugins.anemoi.types import LEAD_TIME
 
+LOG = logging.getLogger(__name__)
 
 def _parse_date(date: DATE) -> datetime.datetime:
     """Parse date from string or tuple"""
@@ -345,6 +353,80 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Gener
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
 
+def convert_to_fieldlist(state, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int, **kwargs) -> ekd.FieldList:
+    """
+    Convert the state to an earthkit FieldList.
+
+    Parameters
+    ----------
+    state : _type_
+        State of the model at a given time step
+    initial_date : datetime.datetime
+        Initial date of the model run
+    runner : CascadeRunner
+        Runner object
+    ensemble_member : int
+        Ensemble member number
+
+    Returns
+    -------
+    ekd.FieldList
+        Earthkit FieldList with the model results
+    """
+
+    target = BytesIO()
+    encoding = {}
+    
+    if ensemble_member is not None:
+        encoding["type"] = "pf"  # probabilistic forecast
+
+    output = GribOutput(runner, target)
+    try:
+        output.write_step(state)
+        output.close()
+        return ekd.from_source('memory', target)
+    except Exception as e:
+        target.close()
+        LOG.warning(
+            "Failed to write step to GRIB output. "
+            "This may be due to missing or incorrect metadata. "
+            "Falling back to ArrayField based outputs. "
+            "Error: %s", e
+        )
+
+    step = frequency_to_seconds(state["date"] - initial_date) // 3600
+    variables: dict[str, Variable] = runner.checkpoint.typed_variables
+
+    fields = []
+
+    for field in state["fields"]:
+        array = state["fields"][field]
+        var = variables[field]
+
+        metadata = {}
+        paramId = shortname_to_paramid(var.grib_keys["param"])
+
+        metadata.update(
+            {
+                "step": step,
+                "base_datetime": initial_date,
+                "valid_datetime": state["date"],
+                "shortName": var.name,
+                "short_name": var.name,
+                "paramId": paramId,
+                "levtype": var.grib_keys["levtype"],
+                "latitudes": runner.checkpoint.latitudes,
+                "longitudes": runner.checkpoint.longitudes,
+                "member": ensemble_member,
+                "units": paramId_to_units(paramId),
+                "edition": 2,
+                **kwargs,
+            }
+        )
+
+        fields.append(ArrayField(array, metadata))
+    return SimpleFieldList.from_fields(fields)
+
 @mark.needs_gpu
 def run_as_earthkit(
     input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None
@@ -379,49 +461,16 @@ def run_as_earthkit(
     ensemble_member = input_state.get("ensemble_member")
     extra_metadata = extra_metadata or {}
 
-    variables: dict[str, Variable] = runner.checkpoint.typed_variables
-
     for state in run(input_state, runner, lead_time):
-        fields = []
-        step = frequency_to_seconds(state["date"] - initial_date) // 3600
-
-        for field in state["fields"]:
-            array = state["fields"][field]
-            if "_grib_templates_for_output" in state and field in state["_grib_templates_for_output"]:
-                metadata = state["_grib_templates_for_output"][field].metadata()
-                metadata = metadata.override(
-                    {"step": step, "ensemble_member": ensemble_member, **extra_metadata}, headers_only_clone=False
-                )  # 'date': time_to_grib(initial_date), 'time': time_to_grib(initial_date)
-
-            else:
-                var = variables[field]
-
-                metadata = {}
-                paramId = shortname_to_paramid(var.grib_keys["param"])
-
-                metadata.update(
-                    {
-                        "step": step,
-                        "base_datetime": initial_date,
-                        "valid_datetime": state["date"],
-                        "shortName": var.name,
-                        "short_name": var.name,
-                        "paramId": paramId,
-                        "levtype": var.grib_keys["levtype"],
-                        "latitudes": runner.checkpoint.latitudes,
-                        "longitudes": runner.checkpoint.longitudes,
-                        "member": ensemble_member,
-                        "units": paramId_to_units(paramId),
-                        "edition": 2,
-                        **extra_metadata,
-                    }
-                )
-
-            fields.append(ArrayField(array, metadata))
-
-        yield FieldList.from_fields(fields)
+        yield convert_to_fieldlist(
+                state,
+                initial_date,
+                runner,
+                ensemble_member=ensemble_member,
+                **extra_metadata,
+            )
+        
     del runner.model
-
 
 @functools.wraps(run_as_earthkit)
 @mark.needs_gpu
