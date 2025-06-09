@@ -16,20 +16,17 @@ Used for when providing initial conditions
 from __future__ import annotations
 
 import logging
-from typing import Any
-from typing import Dict
 from typing import List
 
-from anemoi.inference.config import Configuration
-from anemoi.inference.forcings import BoundaryForcings
+from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.forcings import ComputedForcings
-from anemoi.inference.forcings import CoupledForcings
 from anemoi.inference.forcings import Forcings
-from anemoi.inference.input import Input
+from anemoi.inference.inputs.ekd import EkdInput
 from anemoi.inference.inputs import create_input
+from anemoi.inference.post_processors import create_post_processor
+from anemoi.inference.processor import Processor
 from anemoi.inference.runner import Runner
 from anemoi.inference.types import IntArray
-from anemoi.utils.config import DotDict
 
 LOG = logging.getLogger(__name__)
 
@@ -37,29 +34,24 @@ LOG = logging.getLogger(__name__)
 class CascadeRunner(Runner):
     """Cascade Inference Runner"""
 
-    def __init__(self, config: dict | Configuration, **kwargs):
-
+    def __init__(self, config: RunConfiguration | dict):
         if isinstance(config, dict):
-            # So we get the dot notation
-            config = DotDict(config)
+            config = RunConfiguration(**config)
 
         self.config = config
 
-        default_init_args = dict(
-            checkpoint=config.checkpoint,
+        super().__init__(
+            config.checkpoint, # type: ignore # Error in anemoi.inference
             device=config.device,
             precision=config.precision,
             allow_nans=config.allow_nans,
             verbosity=config.verbosity,
             report_error=config.report_error,
-            use_grib_paramid=config.use_grib_paramid,
-            development_hacks=config.development_hacks,
+            patch_metadata=config.patch_metadata,
+            typed_variables=config.typed_variables,
         )
-        default_init_args.update(kwargs)
 
-        super().__init__(**default_init_args)
-
-    def create_input(self) -> Input:
+    def create_input(self) -> EkdInput:
         """Create the input.
 
         Returns
@@ -67,7 +59,10 @@ class CascadeRunner(Runner):
         Input
             The created input.
         """
-        input = create_input(self, self.config.input)
+        input: EkdInput = create_input(self, self.config.input)
+        if not isinstance(input, EkdInput):
+            LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
+        input.variables = input.checkpoint.select_variables(include=["prognostic", "forcing"], exclude=["diagnostic"])
         LOG.info("Input: %s", input)
         return input
 
@@ -109,87 +104,59 @@ class CascadeRunner(Runner):
         LOG.info("Dynamic computed forcing: %s", result)
         return [result]
 
-    def _input_forcings(self, name: str) -> Dict[str, Any]:
-        """Get the input forcings configuration.
-
-        Parameters
-        ----------
-        name : str
-            The name of the forcings configuration.
-
-        Returns
-        -------
-        dict
-            The input forcings configuration.
-        """
-        if self.config.forcings is None:
-            # Use the same as the input
-            return self.config.input
-
-        if name in self.config.forcings:
-            return self.config.forcings[name]
-
-        if "input" in self.config.forcings:
-            return self.config.forcings.input
-
-        return self.config.forcings
-
     def create_constant_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
         """Create constant coupled forcings.
 
         Parameters
         ----------
-        variables : list
+        variables : List[str]
             The variables for the forcings.
         mask : IntArray
             The mask for the forcings.
 
         Returns
         -------
-        List[Forcings]
+        List
             The created constant coupled forcings.
         """
-        input = create_input(self, self._input_forcings("constant"))
-        result = CoupledForcings(self, input, variables, mask)
-        LOG.info("Constant coupled forcing: %s", result)
-        return [result]
+        # This runner does not support coupled forcings
+        # there are supposed to be already in the state dictionary
+        # or managed by the user.
+        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
+        return []
 
     def create_dynamic_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
         """Create dynamic coupled forcings.
 
         Parameters
         ----------
-        variables : list
+        variables : List[str]
             The variables for the forcings.
         mask : IntArray
             The mask for the forcings.
 
         Returns
         -------
-        List[Forcings]
+        List
             The created dynamic coupled forcings.
         """
-        input = create_input(self, self._input_forcings("dynamic"))
-        result = CoupledForcings(self, input, variables, mask)
-        LOG.info("Dynamic coupled forcing: %s", result)
-        return [result]
+        # This runner does not support coupled forcings
+        # there are supposed to be already in the state dictionary
+        # or managed by the user.
+        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
+        return []
 
-    def create_boundary_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
-        """Create boundary forcings.
-
-        Parameters
-        ----------
-        variables : list
-            The variables for the forcings.
-        mask : IntArray
-            The mask for the forcings.
+    def create_post_processors(self) -> List[Processor]:
+        """Create post-processors.
 
         Returns
         -------
-        List[Forcings]
-            The created boundary forcings.
+        List[Processor]
+            The created post-processors.
         """
-        input = create_input(self, self._input_forcings("boundary"))
-        result = BoundaryForcings(self, input, variables, mask)
-        LOG.info("Boundary forcing: %s", result)
-        return [result]
+        result = []
+        for processor in self.config.post_processors:
+            result.append(create_post_processor(self, processor))
+
+        LOG.info("Post processors: %s", result)
+        return result

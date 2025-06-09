@@ -20,12 +20,13 @@ from typing import Any
 from typing import Callable
 from typing import Optional
 
+from earthkit.data.utils.dates import to_datetime
+
 from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.types import State
 
 from earthkit.workflows import fluent
-from earthkit.workflows.plugins.anemoi.inference import _parse_date
 from earthkit.workflows.plugins.anemoi.inference import _transform_fake
 from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
 from earthkit.workflows.plugins.anemoi.inference import parse_ensemble_members
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from earthkit.workflows.plugins.anemoi.types import VALID_CKPT
 
 LOG = logging.getLogger(__name__)
-E = TypeVar("ENVIRONMENT", bound=list[str] | dict[str, list[str]])
+E = TypeVar("E", bound=list[str] | dict[str, list[str]])
 
 
 def _parse_checkpoint(ckpt: VALID_CKPT) -> str | dict[str, Any]:
@@ -84,10 +85,10 @@ def _add_self_to_environment(environment: E) -> E:
     from earthkit.workflows.plugins.anemoi import __version__ as version
 
     if version.split('.')[-1].startswith('dev'):
-        # If the version is a development version, we only take the first two parts
-        # to avoid issues with pip versioning.
+        # If the version is a development version, ignore it 
+        # such that it is not overwritten
         # e.g. "0.3.1.dev0" -> "0.3"
-        version = '.'.join(version.split('.')[0:2])
+        return environment
 
     version = '.'.join(version.split('.')[:3])  # Ensure version is in x.y.z format
 
@@ -462,7 +463,7 @@ def create_dataset(
         """Apply a task which reduces the dimension"""
         return node.reduce(get_payload(get_task(task_name, options)), dim=dim)
 
-    init = fluent.from_source([get_payload(get_task("init", options.copy()))], dims=["source"])
+    init = fluent.from_source([get_payload(get_task("init", options.copy()))], dims=["source"]) # type: ignore
     loaded = apply_parallel_task(init, "load", dim="parts")
     finalised = apply_reduction_task(loaded, "finalise", dim="parts")
 
@@ -547,7 +548,7 @@ def from_dataset(
 
     checkpoint = Checkpoint(_parse_checkpoint(ckpt))
 
-    dates = list(map(lambda x: _parse_date(date) + x, checkpoint.lagged))
+    dates = list(map(lambda x: to_datetime(date) + x, checkpoint.lagged))
     end_date = max(dates)
     start_date = min(dates)
     frequency = checkpoint.timestep
