@@ -11,31 +11,26 @@ from __future__ import annotations
 
 import datetime
 import functools
+import logging
 from io import BytesIO
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generator
 from typing import Optional
-import logging
 
+import earthkit.data as ekd
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.types import State
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.grib import shortname_to_paramid
-
-
-import earthkit.data as ekd
-from earthkit.data import ArrayField, Field
-from earthkit.data import FieldList
+from earthkit.data import ArrayField
 from earthkit.data import SimpleFieldList
 
 from earthkit.workflows import fluent
 from earthkit.workflows import mark
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
-
-from .output import GribOutput
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
@@ -46,6 +41,7 @@ if TYPE_CHECKING:
     from earthkit.workflows.plugins.anemoi.types import LEAD_TIME
 
 LOG = logging.getLogger(__name__)
+
 
 def _parse_date(date: DATE) -> datetime.datetime:
     """Parse date from string or tuple"""
@@ -353,7 +349,9 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Gener
     yield from runner.run(input_state=input_state, lead_time=lead_time)
 
 
-def convert_to_fieldlist(state, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int, **kwargs) -> ekd.FieldList:
+def convert_to_fieldlist(
+    state, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int, **kwargs
+) -> ekd.FieldList:
     """
     Convert the state to an earthkit FieldList.
 
@@ -374,26 +372,6 @@ def convert_to_fieldlist(state, initial_date: datetime.datetime, runner: Cascade
         Earthkit FieldList with the model results
     """
 
-    target = BytesIO()
-    encoding = {}
-    
-    if ensemble_member is not None:
-        encoding["type"] = "pf"  # probabilistic forecast
-
-    output = GribOutput(runner, target)
-    try:
-        output.write_step(state)
-        output.close()
-        return ekd.from_source('memory', target)
-    except Exception as e:
-        target.close()
-        LOG.warning(
-            "Failed to write step to GRIB output. "
-            "This may be due to missing or incorrect metadata. "
-            "Falling back to ArrayField based outputs. "
-            "Error: %s", e
-        )
-
     step = frequency_to_seconds(state["date"] - initial_date) // 3600
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
@@ -402,6 +380,7 @@ def convert_to_fieldlist(state, initial_date: datetime.datetime, runner: Cascade
     for field in state["fields"]:
         array = state["fields"][field]
         var = variables[field]
+        kwargs = kwargs.copy()
 
         metadata = {}
         paramId = shortname_to_paramid(var.grib_keys["param"])
@@ -409,23 +388,54 @@ def convert_to_fieldlist(state, initial_date: datetime.datetime, runner: Cascade
         metadata.update(
             {
                 "step": step,
-                "base_datetime": initial_date,
-                "valid_datetime": state["date"],
-                "shortName": var.name,
-                "short_name": var.name,
+                "date": initial_date,
                 "paramId": paramId,
                 "levtype": var.grib_keys["levtype"],
-                "latitudes": runner.checkpoint.latitudes,
-                "longitudes": runner.checkpoint.longitudes,
-                "member": ensemble_member,
-                "units": paramId_to_units(paramId),
-                "edition": 2,
-                **kwargs,
+                "edition": 1,
+                "stream": "oper",
+                "levtype": var.grib_keys["levtype"],
             }
         )
+        if ensemble_member is not None:
+            metadata.update(
+                {
+                    "type": "pf",
+                    "number": ensemble_member,
+                }
+            )
+        metadata.update(kwargs)
 
-        fields.append(ArrayField(array, metadata))
+        # metadata.update(
+        #     {
+        #         "step": step,
+        #         "base_datetime": initial_date,
+        #         "valid_datetime": state["date"],
+        #         "shortName": var.name,
+        #         "short_name": var.name,
+        #         "paramId": paramId,
+        #         "levtype": var.grib_keys["levtype"],
+        #         "latitudes": runner.checkpoint.latitudes,
+        #         "longitudes": runner.checkpoint.longitudes,
+        #         "number": ensemble_member,
+        #         "units": paramId_to_units(paramId),
+        #         "edition": 2,
+        #         "type": "pf" if ensemble_member is not None else "fc",
+        #         **kwargs,
+        #     }
+        # )
+        try:
+            encoder = ekd.create_encoder("grib", metadata=metadata)
+
+            target = BytesIO()
+            ArrayField(array, metadata).to_target("file", target, encoder=encoder)
+            fields.append(ekd.from_source("memory", target.getvalue())[0])
+            target.flush()
+        except Exception as e:
+            LOG.error(f"Error converting field {field} to grib: {e}")
+            fields.append(ArrayField(array, metadata))
+
     return SimpleFieldList.from_fields(fields)
+
 
 @mark.needs_gpu
 def run_as_earthkit(
@@ -463,14 +473,15 @@ def run_as_earthkit(
 
     for state in run(input_state, runner, lead_time):
         yield convert_to_fieldlist(
-                state,
-                initial_date,
-                runner,
-                ensemble_member=ensemble_member,
-                **extra_metadata,
-            )
-        
+            state,
+            initial_date,
+            runner,
+            ensemble_member=ensemble_member,
+            **extra_metadata,
+        )
+
     del runner.model
+
 
 @functools.wraps(run_as_earthkit)
 @mark.needs_gpu
