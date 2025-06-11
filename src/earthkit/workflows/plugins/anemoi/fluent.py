@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
 from typing import Optional
+from typing import TypeVar
 
 from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
@@ -73,7 +74,7 @@ def _add_self_to_environment(environment: E) -> E:
     Parameters
     ----------
     environment : list[str] | dict[str, list[str]]
-        Environment list to self in place to 
+        Environment list to self in place to
 
     Returns
     -------
@@ -83,31 +84,36 @@ def _add_self_to_environment(environment: E) -> E:
 
     from earthkit.workflows.plugins.anemoi import __version__ as version
 
-    if version.split('.')[-1].startswith('dev'):
+    if version.split(".")[-1].startswith("dev"):
         # If the version is a development version, we only take the first two parts
         # to avoid issues with pip versioning.
         # e.g. "0.3.1.dev0" -> "0.3"
-        version = '.'.join(version.split('.')[0:2])
+        version = ".".join(version.split(".")[0:2])
 
-    version = '.'.join(version.split('.')[:3])  # Ensure version is in x.y.z format
+    version = ".".join(version.split(".")[:3])  # Ensure version is in x.y.z format
 
     package_name = "earthkit-workflows-anemoi"
     self_var = f"{package_name}~={version}"
 
     def add_self_to_list(env_list: list[str]) -> list[str]:
+        if len(env_list) == 0:
+            # If the environment is empty, leave it as such
+            return []
+
         if any(str(e).startswith(package_name) for e in env_list):
             # If the environment already contains the self variable, return it as is
             return env_list
         env_list.append(self_var)
         return env_list
-    
+
     if isinstance(environment, list):
         environment = add_self_to_list(environment)
     elif isinstance(environment, dict):
         for key in environment:
             environment[key] = add_self_to_list(environment[key])
     return environment
-    
+
+
 def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, list[str]]:
     """Crack the environment into a dictionary of lists."""
     if environment is None:
@@ -118,6 +124,7 @@ def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, l
         return _add_self_to_environment({k: environment.get(k, []) for k in keys})
     else:
         raise TypeError(f"Invalid type for environment: {type(environment)}. Must be list or dict.")
+
 
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
