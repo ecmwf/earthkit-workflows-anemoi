@@ -9,14 +9,16 @@
 # https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
 
 [build-system]
-requires = [ "setuptools>=65", "setuptools-scm>=8" ]
 build-backend = "setuptools.build_meta"
+
+requires = [ "setuptools>=65", "setuptools-scm>=8" ]
 
 [project]
 name = "earthkit-workflows-anemoi"
 description = "An earthkit-workflows interface to anemoi inference"
+readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = [ "LICENSE" ]
 authors = [
   { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
 ]
@@ -28,7 +30,6 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
-readme = "README.md"
 dynamic = [ "version" ]
 
 dependencies = [
@@ -36,8 +37,6 @@ dependencies = [
   "anemoi-inference>=0.5.3",
   "earthkit-workflows",
 ]
-optional-dependencies.tests = [ "pytest", "pytest-mock" ]
-
 optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
@@ -48,6 +47,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 
+optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
 [tool.setuptools]
 include-package-data = true
@@ -69,7 +69,4 @@ profile = "black"
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "DEBUG"
-testpaths = ["tests/"]
-addopts = "-n8"
-
-
+testpaths = [ "tests/" ]
