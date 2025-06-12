@@ -35,44 +35,44 @@ STANDARD_INFERENCE_TESTS = [
     [
         "simple",
         2,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "simple",
         8,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 8, "param": 6, "date": 1},
     ],
     [
         "simple",
         8,
-        {"date": "20200101", "lead_time": "4D"},
+        {"date": "20200101T00", "lead_time": "4D"},
         {"step": 16, ENSEMBLE_DIMENSION_NAME: 8, "param": 6, "date": 1},
     ],
     # Test different model configs
     [
         "simple",
         2,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "surface",
         2,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "pressure",
         2,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "full_atmo",
         2,
-        {"date": "20200101", "lead_time": "1D"},
+        {"date": "20200101T00", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
 ]
