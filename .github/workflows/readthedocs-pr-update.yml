@@ -11,6 +11,7 @@ on:
     # documentation files.
     paths:
       - "docs/**"
+  workflow_dispatch: ~
 
 permissions:
   pull-requests: write
