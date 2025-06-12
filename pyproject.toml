@@ -38,6 +38,17 @@ dependencies = [
 ]
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
+optional-dependencies.docs = [
+  "autodoc-pydantic",
+  "nbsphinx",
+  "pandoc",
+  "rstfmt",
+  "sphinx<8.2",
+  "sphinx-argparse<0.5",
+  "sphinx-rtd-theme",
+]
+
+
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
