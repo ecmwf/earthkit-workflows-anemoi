@@ -324,7 +324,6 @@ def _paramId_to_units(paramId: int) -> str:
     return units
 
 
-
 @mark.needs_gpu
 def run_as_earthkit(
     input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] = None

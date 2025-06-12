@@ -27,9 +27,9 @@ from anemoi.inference.types import State
 
 from earthkit.workflows import fluent
 from earthkit.workflows.plugins.anemoi.inference import _parse_date
+from earthkit.workflows.plugins.anemoi.inference import _parse_ensemble_members
 from earthkit.workflows.plugins.anemoi.inference import _transform_fake
 from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
-from earthkit.workflows.plugins.anemoi.inference import _parse_ensemble_members
 from earthkit.workflows.plugins.anemoi.inference import run_model
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
