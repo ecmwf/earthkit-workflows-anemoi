@@ -324,26 +324,6 @@ def _paramId_to_units(paramId: int) -> str:
     return units
 
 
-def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Generator[Any, None, None]:
-    """
-    Run the model.
-
-    Parameters
-    ----------
-    input_state : dict
-        Initial conditions for the model
-    runner : CascadeRunner
-        CascadeRunner object
-    lead_time : LEAD_TIME
-        Lead time for the model
-
-    Returns
-    -------
-    Generator[Any, None, None]
-        State of the model at each time step
-    """
-    yield from runner.run(input_state=input_state, lead_time=lead_time)
-
 
 @mark.needs_gpu
 def run_as_earthkit(
@@ -381,7 +361,7 @@ def run_as_earthkit(
 
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
-    for state in run(input_state, runner, lead_time):
+    for state in runner.run(input_state=input_state, lead_time=lead_time):
         fields = []
         step = frequency_to_seconds(state["date"] - initial_date) // 3600
 

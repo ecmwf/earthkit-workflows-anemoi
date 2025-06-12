@@ -28,6 +28,7 @@ It is possible to configure the input source just like you would do with the
 ***************
 
 If more complex initial conditions are required, you can use the ``infer`` method on an existing source node.
+
 .. code-block:: python
 
     from earthkit.workflows.plugins import anemoi as anemoi_workflows

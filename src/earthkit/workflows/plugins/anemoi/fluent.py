@@ -29,7 +29,7 @@ from earthkit.workflows import fluent
 from earthkit.workflows.plugins.anemoi.inference import _parse_date
 from earthkit.workflows.plugins.anemoi.inference import _transform_fake
 from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
-from earthkit.workflows.plugins.anemoi.inference import parse_ensemble_members
+from earthkit.workflows.plugins.anemoi.inference import _parse_ensemble_members
 from earthkit.workflows.plugins.anemoi.inference import run_model
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
@@ -337,7 +337,7 @@ def from_initial_conditions(
         if ensemble_members is None:
             ensemble_members = len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME])
 
-        ensemble_members = parse_ensemble_members(ensemble_members)
+        ensemble_members = _parse_ensemble_members(ensemble_members)
 
         if not len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME]) == len(ensemble_members):
             raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
@@ -346,8 +346,8 @@ def from_initial_conditions(
     else:
         ens_initial_conditions = initial_conditions.transform(
             _transform_fake,
-            list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
-            (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
+            list(zip(_parse_ensemble_members(ensemble_members))),  # type: ignore
+            (ENSEMBLE_DIMENSION_NAME, _parse_ensemble_members(ensemble_members)),  # type: ignore
         )
     return run_model(
         runner, config, ens_initial_conditions, lead_time, payload_metadata={"environment": environment["inference"]}
