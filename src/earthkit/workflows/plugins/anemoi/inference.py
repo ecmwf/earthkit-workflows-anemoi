@@ -365,6 +365,8 @@ def convert_to_fieldlist(
         Runner object
     ensemble_member : int
         Ensemble member number
+    kwargs : dict
+        Additional metadata to add to the fields
 
     Returns
     -------
@@ -389,40 +391,23 @@ def convert_to_fieldlist(
             {
                 "step": step,
                 "date": initial_date,
+                "levtype": var.grib_keys["levtype"],
                 "paramId": paramId,
-                "levtype": var.grib_keys["levtype"],
-                "edition": 1,
-                "stream": "oper",
-                "levtype": var.grib_keys["levtype"],
+                "edition": 2,
+                "type": "fc",
+                "class": "ai",
             }
         )
         if ensemble_member is not None:
             metadata.update(
                 {
                     "type": "pf",
+                    "stream": "enfo",
                     "number": ensemble_member,
                 }
             )
         metadata.update(kwargs)
 
-        # metadata.update(
-        #     {
-        #         "step": step,
-        #         "base_datetime": initial_date,
-        #         "valid_datetime": state["date"],
-        #         "shortName": var.name,
-        #         "short_name": var.name,
-        #         "paramId": paramId,
-        #         "levtype": var.grib_keys["levtype"],
-        #         "latitudes": runner.checkpoint.latitudes,
-        #         "longitudes": runner.checkpoint.longitudes,
-        #         "number": ensemble_member,
-        #         "units": paramId_to_units(paramId),
-        #         "edition": 2,
-        #         "type": "pf" if ensemble_member is not None else "fc",
-        #         **kwargs,
-        #     }
-        # )
         try:
             encoder = ekd.create_encoder("grib", metadata=metadata)
 
