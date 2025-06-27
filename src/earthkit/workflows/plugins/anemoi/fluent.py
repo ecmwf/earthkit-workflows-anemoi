@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
 from typing import Optional
+from typing import TypeVar
 
 from anemoi.inference.checkpoint import Checkpoint
 from anemoi.inference.config.run import RunConfiguration
@@ -26,9 +27,9 @@ from anemoi.inference.types import State
 
 from earthkit.workflows import fluent
 from earthkit.workflows.plugins.anemoi.inference import _parse_date
+from earthkit.workflows.plugins.anemoi.inference import _parse_ensemble_members
 from earthkit.workflows.plugins.anemoi.inference import _transform_fake
 from earthkit.workflows.plugins.anemoi.inference import get_initial_conditions_source
-from earthkit.workflows.plugins.anemoi.inference import parse_ensemble_members
 from earthkit.workflows.plugins.anemoi.inference import run_model
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
@@ -73,7 +74,7 @@ def _add_self_to_environment(environment: E) -> E:
     Parameters
     ----------
     environment : list[str] | dict[str, list[str]]
-        Environment list to self in place to 
+        Environment list to self in place to
 
     Returns
     -------
@@ -83,31 +84,36 @@ def _add_self_to_environment(environment: E) -> E:
 
     from earthkit.workflows.plugins.anemoi import __version__ as version
 
-    if version.split('.')[-1].startswith('dev'):
+    if version.split(".")[-1].startswith("dev"):
         # If the version is a development version, we only take the first two parts
         # to avoid issues with pip versioning.
         # e.g. "0.3.1.dev0" -> "0.3"
-        version = '.'.join(version.split('.')[0:2])
+        version = ".".join(version.split(".")[0:2])
 
-    version = '.'.join(version.split('.')[:3])  # Ensure version is in x.y.z format
+    version = ".".join(version.split(".")[:3])  # Ensure version is in x.y.z format
 
     package_name = "earthkit-workflows-anemoi"
     self_var = f"{package_name}~={version}"
 
     def add_self_to_list(env_list: list[str]) -> list[str]:
+        if len(env_list) == 0:
+            # If the environment is empty, leave it as such
+            return []
+
         if any(str(e).startswith(package_name) for e in env_list):
             # If the environment already contains the self variable, return it as is
             return env_list
         env_list.append(self_var)
         return env_list
-    
+
     if isinstance(environment, list):
         environment = add_self_to_list(environment)
     elif isinstance(environment, dict):
         for key in environment:
             environment[key] = add_self_to_list(environment[key])
     return environment
-    
+
+
 def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, list[str]]:
     """Crack the environment into a dictionary of lists."""
     if environment is None:
@@ -118,6 +124,7 @@ def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, l
         return _add_self_to_environment({k: environment.get(k, []) for k in keys})
     else:
         raise TypeError(f"Invalid type for environment: {type(environment)}. Must be list or dict.")
+
 
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
@@ -330,7 +337,7 @@ def from_initial_conditions(
         if ensemble_members is None:
             ensemble_members = len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME])
 
-        ensemble_members = parse_ensemble_members(ensemble_members)
+        ensemble_members = _parse_ensemble_members(ensemble_members)
 
         if not len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME]) == len(ensemble_members):
             raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
@@ -339,8 +346,8 @@ def from_initial_conditions(
     else:
         ens_initial_conditions = initial_conditions.transform(
             _transform_fake,
-            list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
-            (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
+            list(zip(_parse_ensemble_members(ensemble_members))),  # type: ignore
+            (ENSEMBLE_DIMENSION_NAME, _parse_ensemble_members(ensemble_members)),  # type: ignore
         )
     return run_model(
         runner, config, ens_initial_conditions, lead_time, payload_metadata={"environment": environment["inference"]}

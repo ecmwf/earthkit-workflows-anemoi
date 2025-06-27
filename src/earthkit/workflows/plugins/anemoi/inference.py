@@ -102,7 +102,7 @@ def _transform_fake(act: fluent.Action, ens_num: int) -> fluent.Action:
     return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
 
 
-def parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int]:
+def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int]:
     """Parse ensemble members"""
     if isinstance(ensemble_members, int):
         if ensemble_members < 1:
@@ -142,7 +142,7 @@ def get_initial_conditions_source(
     fluent.Action
         Fluent action of the initial conditions
     """
-    ensemble_members = parse_ensemble_members(ensemble_members)
+    ensemble_members = _parse_ensemble_members(ensemble_members)
     if initial_condition_perturbation:
         if isinstance(config, fluent.Action):
             init_conditions = config.transform(
@@ -309,7 +309,7 @@ def run_model(
     return _expand(runner, model_results)
 
 
-def paramId_to_units(paramId: int) -> str:
+def _paramId_to_units(paramId: int) -> str:
     """Get the units for a given paramId."""
     from eccodes import codes_get
     from eccodes import codes_grib_new_from_samples
@@ -322,27 +322,6 @@ def paramId_to_units(paramId: int) -> str:
     units = codes_get(gid, "units")
     codes_release(gid)
     return units
-
-
-def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Generator[Any, None, None]:
-    """
-    Run the model.
-
-    Parameters
-    ----------
-    input_state : dict
-        Initial conditions for the model
-    runner : CascadeRunner
-        CascadeRunner object
-    lead_time : LEAD_TIME
-        Lead time for the model
-
-    Returns
-    -------
-    Generator[Any, None, None]
-        State of the model at each time step
-    """
-    yield from runner.run(input_state=input_state, lead_time=lead_time)
 
 
 @mark.needs_gpu
@@ -381,7 +360,7 @@ def run_as_earthkit(
 
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
-    for state in run(input_state, runner, lead_time):
+    for state in runner.run(input_state=input_state, lead_time=lead_time):
         fields = []
         step = frequency_to_seconds(state["date"] - initial_date) // 3600
 
@@ -411,7 +390,7 @@ def run_as_earthkit(
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
                         "member": ensemble_member,
-                        "units": paramId_to_units(paramId),
+                        "units": _paramId_to_units(paramId),
                         "edition": 2,
                         **extra_metadata,
                     }
