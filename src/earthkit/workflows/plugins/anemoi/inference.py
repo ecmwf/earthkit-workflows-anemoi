@@ -137,6 +137,7 @@ def get_initial_conditions_source(
         the ensemble members are simulated by wrapping the action.
     payload_metadata : Optional[dict[str, Any]], optional
         Metadata to add to the payload, by default None
+
     Returns
     -------
     fluent.Action
@@ -386,15 +387,15 @@ def run_as_earthkit(
                         "shortName": var.name,
                         "short_name": var.name,
                         "paramId": paramId,
-                        "levtype": var.grib_keys["levtype"],
+                        "levtype": var.grib_keys.get("levtype", None),
                         "latitudes": runner.checkpoint.latitudes,
                         "longitudes": runner.checkpoint.longitudes,
                         "member": ensemble_member,
                         "units": _paramId_to_units(paramId),
                         "edition": 2,
-                        **extra_metadata,
                     }
                 )
+                metadata.update(extra_metadata)
 
             fields.append(ArrayField(array, metadata))
 
