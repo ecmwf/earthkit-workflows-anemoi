@@ -21,8 +21,8 @@ from typing import List
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.forcings import ComputedForcings
 from anemoi.inference.forcings import Forcings
-from anemoi.inference.inputs.ekd import EkdInput
 from anemoi.inference.inputs import create_input
+from anemoi.inference.inputs.ekd import EkdInput
 from anemoi.inference.post_processors import create_post_processor
 from anemoi.inference.processor import Processor
 from anemoi.inference.runner import Runner
@@ -41,7 +41,7 @@ class CascadeRunner(Runner):
         self.config = config
 
         super().__init__(
-            config.checkpoint, # type: ignore # Error in anemoi.inference
+            config.checkpoint,  # type: ignore # Error in anemoi.inference
             device=config.device,
             precision=config.precision,
             allow_nans=config.allow_nans,

@@ -19,17 +19,15 @@ from typing import Generator
 from typing import Optional
 
 import earthkit.data as ekd
-from earthkit.data.utils.dates import to_datetime
-
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.types import State
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta as to_timedelta
 from anemoi.utils.grib import shortname_to_paramid
+from earthkit.data.utils.dates import to_datetime
 
 from earthkit.workflows import fluent
 from earthkit.workflows import mark
-
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
@@ -228,7 +226,7 @@ def _expand(runner: CascadeRunner, model_results: fluent.Action) -> fluent.Actio
             ("param_level", pressure_vars_complete),
             backend_kwargs=dict(method="sel", remapping={"param_level": "{param}_{level}"}),
         )
-        
+
         # pressure_expansion = model_results.expand(
         #     ("param", pressure_vars), ("param", pressure_vars), backend_kwargs=dict(method="sel")
         # )
