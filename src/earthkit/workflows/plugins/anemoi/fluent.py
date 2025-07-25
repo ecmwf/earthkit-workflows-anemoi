@@ -96,6 +96,10 @@ def _add_self_to_environment(environment: E) -> E:
     self_var = f"{package_name}~={version}"
 
     def add_self_to_list(env_list: list[str]) -> list[str]:
+        if len(env_list) == 0:
+            # If the environment is empty, leave it as such
+            return []
+
         if any(str(e).startswith(package_name) for e in env_list):
             # If the environment already contains the self variable, return it as is
             return env_list

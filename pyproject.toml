@@ -37,6 +37,16 @@ dependencies = [
   "anemoi-inference>=0.5.3",
   "earthkit-workflows",
 ]
+optional-dependencies.docs = [
+  "autodoc-pydantic",
+  "nbsphinx",
+  "pandoc",
+  "rstfmt",
+  "sphinx<8.2",
+  "sphinx-argparse<0.5",
+  "sphinx-rtd-theme",
+]
+
 optional-dependencies.tests = [ "pytest", "pytest-mock" ]
 
 [tool.setuptools]
@@ -60,4 +70,3 @@ profile = "black"
 log_cli = true
 log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
-addopts = "-n8"
