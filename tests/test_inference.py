@@ -21,9 +21,22 @@ from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 @pytest.fixture
 @fake_checkpoints
-def mock_config():
+def mock_config(tmp_path: Path):
+    import yaml
+
+    parent_dir = Path(__file__).parent
+    config_path = parent_dir / "configs" / "simple.yaml"
+
+    config_dict = yaml.safe_load(config_path.read_text())
+    config_dict["checkpoint"] = f"{parent_dir}/{config_dict['checkpoint']}"
+
+    with open(tmp_path / "simple.yaml", "w") as f:
+        yaml.safe_dump(config_dict, f)
+
+    tmp_path = tmp_path / "simple.yaml"
+
     return MockRunConfiguration.load(
-        (Path(__file__).parent / "configs/simple.yaml").absolute(),
+        str((tmp_path).absolute()),
         overrides=dict(runner="testing", device="cpu", input="dummy"),
     )
 
@@ -40,8 +53,7 @@ def mock_config():
         ["2000-01-01", 10, True, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
         ["2000-01-01", 51, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
         ["2000-01-01", 51, True, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        [(2000, 1, 1), 51, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        [(2000, 1, 1), 51, True, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        [-1, 51, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
     ],
 )
 def test_get_initial_conditions_action(mock_config, date, ensemble_members, perturbation, shape):
