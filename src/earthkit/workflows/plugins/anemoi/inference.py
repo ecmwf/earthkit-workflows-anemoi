@@ -357,11 +357,6 @@ def convert_to_fieldlist(
         Earthkit FieldList with the model results
     """
 
-    step = frequency_to_seconds(state["date"] - initial_date) // 3600
-    variables: dict[str, Variable] = runner.checkpoint.typed_variables
-
-    from anemoi.inference.outputs.gribmemory import GribMemoryOutput
-
     metadata = {}
 
     metadata.update(
@@ -382,6 +377,8 @@ def convert_to_fieldlist(
     metadata.update(kwargs)
 
     try:
+        from anemoi.inference.outputs.gribmemory import GribMemoryOutput
+
         target = BytesIO()
         output = GribMemoryOutput(runner, out=target, grib2_keys=metadata)
         output.write_state(state)
@@ -394,6 +391,10 @@ def convert_to_fieldlist(
         LOG.error(f"Error converting state to grib, will convert to ArrayField: {e}")
 
     fields = []
+
+    step = frequency_to_seconds(state["date"] - initial_date) // 3600
+    variables: dict[str, Variable] = runner.checkpoint.typed_variables
+
     for var, array in state.fields.items():
         variable = variables[var]
         paramId = shortname_to_paramid(variable.param)
