@@ -59,6 +59,16 @@ class CascadeRunner(Runner):
 
         super().__init__(**default_init_args)
 
+        # TODO: REMOVE WHEN ANEMOI-INFERENCE HAS BETTER DEVICE HANDLING
+        import torch
+
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
     def create_input(self) -> Input:
         """Create the input.
 
