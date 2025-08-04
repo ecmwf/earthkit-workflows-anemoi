@@ -51,6 +51,16 @@ class CascadeRunner(Runner):
             typed_variables=config.typed_variables,
         )
 
+        # TODO: REMOVE WHEN ANEMOI-INFERENCE HAS BETTER DEVICE HANDLING
+        import torch
+
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
     def create_input(self) -> EkdInput:
         """Create the input.
 
