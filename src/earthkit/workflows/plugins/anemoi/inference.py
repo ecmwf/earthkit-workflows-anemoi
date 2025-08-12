@@ -390,7 +390,7 @@ def convert_to_fieldlist(
         return fieldlist
 
     except Exception as e:
-        LOG.error(f"Error converting state to grib, will convert to ArrayField.")
+        LOG.warning(f"Error converting state to grib, will convert to ArrayField.")
 
     fields = []
 
@@ -410,12 +410,14 @@ def convert_to_fieldlist(
                 "units": _paramId_to_units(paramId),
                 "shortName": variable.param,
                 "param": variable.param,
-                "type": "fc",
-                "class": "ai",
+                "latitudes": state['latitudes'],
+                "longitudes": state['longitudes'],
             }
         )
         if 'levtype' in variable.grib_keys:
             metadata["levtype"] = variable.grib_keys["levtype"]
+        if  variable.level is not None:
+            metadata["level"] = variable.level
         fields.append(ekd.ArrayField(array, metadata.copy()))
 
     return ekd.SimpleFieldList.from_fields(fields)
