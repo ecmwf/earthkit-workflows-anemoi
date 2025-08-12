@@ -20,6 +20,7 @@ from typing import List
 
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.forcings import ComputedForcings
+from anemoi.inference.forcings import CoupledForcings
 from anemoi.inference.forcings import Forcings
 from anemoi.inference.inputs import create_input
 from anemoi.inference.inputs.ekd import EkdInput
@@ -51,16 +52,6 @@ class CascadeRunner(Runner):
             typed_variables=config.typed_variables,
         )
 
-        # TODO: REMOVE WHEN ANEMOI-INFERENCE HAS BETTER DEVICE HANDLING
-        import torch
-
-        if torch.cuda.is_available():
-            self.device = "cuda"
-        elif torch.backends.mps.is_available():
-            self.device = "mps"
-        else:
-            self.device = "cpu"
-
     def create_input(self) -> EkdInput:
         """Create the input.
 
@@ -72,7 +63,9 @@ class CascadeRunner(Runner):
         input: EkdInput = create_input(self, self.config.input)
         if not isinstance(input, EkdInput):
             LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
-        input.variables = input.checkpoint.select_variables(include=["prognostic", "forcing"], exclude=["diagnostic"])
+        # input.variables = input.checkpoint.select_variables(include=["prognostic", "forcing"], exclude=["diagnostic"])
+        input.variables = input.checkpoint.variables_from_input(include_forcings=True)
+        LOG.warning("Input variables: %s", input.variables)
         LOG.info("Input: %s", input)
         return input
 
@@ -132,8 +125,10 @@ class CascadeRunner(Runner):
         # This runner does not support coupled forcings
         # there are supposed to be already in the state dictionary
         # or managed by the user.
-        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
-        return []
+        input = create_input(self, self.config.input)
+        result = CoupledForcings(self, input, variables, mask)
+        LOG.info("Constant coupled forcing: %s", result)
+        return [result]
 
     def create_dynamic_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
         """Create dynamic coupled forcings.
