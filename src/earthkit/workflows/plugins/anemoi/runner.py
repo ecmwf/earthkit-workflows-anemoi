@@ -65,7 +65,6 @@ class CascadeRunner(Runner):
             LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
         # input.variables = input.checkpoint.select_variables(include=["prognostic", "forcing"], exclude=["diagnostic"])
         input.variables = input.checkpoint.variables_from_input(include_forcings=True)
-        LOG.warning("Input variables: %s", input.variables)
         LOG.info("Input: %s", input)
         return input
 

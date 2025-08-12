@@ -333,7 +333,7 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Gener
 
 
 def convert_to_fieldlist(
-    state, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int | None, **kwargs
+    state: dict, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int | None, templates: list[str] | None = None, **kwargs
 ) -> ekd.SimpleFieldList:
     """
     Convert the state to an earthkit FieldList.
@@ -348,6 +348,8 @@ def convert_to_fieldlist(
         Runner object
     ensemble_member : int | None
         Ensemble member number
+    templates: list[str] | None
+        Templates to use for the output, by default None
     kwargs : dict
         Additional metadata to add to the fields
 
@@ -366,7 +368,7 @@ def convert_to_fieldlist(
             "class": "ai",
         }
     )
-    if ensemble_member is not None:
+    if ensemble_member is not None and ensemble_member >= 1:
         metadata.update(
             {
                 "type": "pf",
@@ -380,7 +382,7 @@ def convert_to_fieldlist(
         from anemoi.inference.outputs.gribmemory import GribMemoryOutput
 
         target = BytesIO()
-        output = GribMemoryOutput(runner, out=target, grib2_keys=metadata)
+        output = GribMemoryOutput(runner, out=target, grib2_keys=metadata, templates=templates)
         output.write_state(state)
 
         target.seek(0, 0)
@@ -388,31 +390,33 @@ def convert_to_fieldlist(
         return fieldlist
 
     except Exception as e:
-        LOG.error(f"Error converting state to grib, will convert to ArrayField: {e}")
+        LOG.error(f"Error converting state to grib, will convert to ArrayField.")
 
     fields = []
 
     step = frequency_to_seconds(state["date"] - initial_date) // 3600
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
-    for var, array in state.fields.items():
+    for var, array in state['fields'].items():
         variable = variables[var]
         paramId = shortname_to_paramid(variable.param)
 
         metadata.update(
             {
                 "step": step,
-                "date": initial_date,
-                "levtype": variable.grib_keys["levtype"],
+                "base_datetime": initial_date,
+                "valid_datetime": state['date'],
                 "paramId": paramId,
                 "units": _paramId_to_units(paramId),
                 "shortName": variable.param,
-                "edition": 2,
+                "param": variable.param,
                 "type": "fc",
                 "class": "ai",
             }
         )
-        fields.append(ekd.ArrayField(array, metadata))
+        if 'levtype' in variable.grib_keys:
+            metadata["levtype"] = variable.grib_keys["levtype"]
+        fields.append(ekd.ArrayField(array, metadata.copy()))
 
     return ekd.SimpleFieldList.from_fields(fields)
 
