@@ -133,7 +133,7 @@ def from_config(
     date: Optional[DATE] = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     environment: ENVIRONMENT = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> fluent.Action:
     """
     Run an anemoi inference model from a configuration file
@@ -156,7 +156,7 @@ def from_config(
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
     kwargs : dict
-        Additional arguments to pass to the runner
+        Additional arguments to pass to the configuration
 
     Returns
     -------
@@ -210,7 +210,7 @@ def from_input(
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
     environment: ENVIRONMENT = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> fluent.Action:
     """
     Run an anemoi inference model from a given input source
@@ -237,7 +237,7 @@ def from_input(
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
     kwargs : dict
-        Additional arguments to pass to the runner
+        Additional arguments to pass to the configuration
 
     Returns
     -------
@@ -263,7 +263,7 @@ def from_input(
     )
 
     return run_model(
-        runner, config, input_state_source, lead_time, payload_metadata={"environment": environment["inference"]}
+        runner, config, input_state_source, lead_time, payload_metadata={"environment": environment["inference"]},
     )
 
 
@@ -275,7 +275,7 @@ def from_initial_conditions(
     *,
     ensemble_members: Optional[ENSEMBLE_MEMBER_SPECIFICATION] = None,
     environment: Optional[list[str]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> fluent.Action:
     """
     Run an anemoi inference model from initial conditions
@@ -307,7 +307,7 @@ def from_initial_conditions(
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
     kwargs : dict
-        Additional arguments to pass to the runner
+        Additional arguments to pass to the configuration
 
     Returns
     -------
@@ -497,7 +497,7 @@ def from_dataset(
     input_template: Optional[dict[str, Any]] = None,
     number_of_dataset_tasks: Optional[int] = None,
     environment: ENVIRONMENT = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> fluent.Action:
     """
     Run an anemoi inference model after creating a dataset from a recipe.
