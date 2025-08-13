@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 import functools
 import logging
+import os
 from io import BytesIO
 from typing import TYPE_CHECKING
 from typing import Any
@@ -46,7 +47,6 @@ def _get_initial_conditions(input: Input, date: DATE) -> State:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date=to_datetime(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
-    input_state.pop("_grib_templates_for_output", None)
 
     return input_state
 
@@ -61,7 +61,6 @@ def _get_initial_conditions_ens(input: Input, ens_mem: int, date: DATE) -> State
     input_state = input.create_input_state(date=to_datetime(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
     input_state["ensemble_member"] = ens_mem
-    input_state.pop("_grib_templates_for_output", None)
 
     return input_state
 
@@ -71,9 +70,16 @@ def _get_initial_conditions_from_config(config: RunConfiguration, date: DATE, en
     runner = CascadeRunner(config)
     input = runner.create_input()
 
-    if ens_mem is not None:
-        return _get_initial_conditions_ens(input, ens_mem, date)
-    return _get_initial_conditions(input, date)
+    if hasattr(runner.config, "env"):
+        # Set environment variables found in the configuration
+        for key, value in runner.config.env.items():
+            os.environ[key] = str(value)
+
+    if ens_mem is not None and ens_mem >= 1:
+        state = _get_initial_conditions_ens(input, ens_mem, date)
+    state = _get_initial_conditions(input, date)
+    state.pop("_grib_templates_for_output", None)
+    return state
 
 
 def _transform_fake(act: fluent.Action, ens_num: int) -> fluent.Action:
@@ -380,9 +386,14 @@ def convert_to_fieldlist(
 
     try:
         from anemoi.inference.outputs.gribmemory import GribMemoryOutput
+        output_kwargs = runner.config.output
+        if isinstance(output_kwargs, str):
+            output_kwargs = {}
+        if isinstance(output_kwargs, dict):
+            output_kwargs = output_kwargs.copy().get("out", {})
 
         target = BytesIO()
-        output = GribMemoryOutput(runner, out=target, grib2_keys=metadata, templates=templates)
+        output = GribMemoryOutput(runner, out=target, grib2_keys=metadata, **output_kwargs)
         output.write_state(state)
 
         target.seek(0, 0)
@@ -390,7 +401,7 @@ def convert_to_fieldlist(
         return fieldlist
 
     except Exception as e:
-        LOG.warning(f"Error converting state to grib, will convert to ArrayField.")
+        LOG.warning(f"Error converting state to grib, will convert to ArrayField. {e}")
 
     import numpy as np
     fields = []
@@ -448,8 +459,6 @@ def run_as_earthkit(
     Generator[SimpleFieldList, None, None]
         State of the model at each time step
     """
-    import os
-
     if hasattr(runner.config, "env"):
         # Set environment variables found in the configuration
         for key, value in runner.config.env.items():
@@ -479,16 +488,16 @@ def run_as_earthkit(
 @functools.wraps(run_as_earthkit)
 @mark.needs_gpu
 def run_as_earthkit_from_config(
-    input_state: dict, config: RunConfiguration, lead_time: LEAD_TIME, extra_metadata: Optional[dict[str, Any]] = None
+    input_state: dict, config: RunConfiguration, **kw,
 ) -> Generator[ekd.SimpleFieldList, None, None]:
     """Run from config"""
     runner = CascadeRunner(config)
-    yield from run_as_earthkit(input_state, runner, lead_time, extra_metadata)
+    yield from run_as_earthkit(input_state, runner, **kw)
 
 
 @mark.needs_gpu
 def collect_as_earthkit(
-    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: Optional[dict[str, Any]] = None
+    *a, **kw
 ) -> ekd.SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
@@ -510,7 +519,7 @@ def collect_as_earthkit(
         Combined FieldList of the model run
     """
     fields = []
-    for state in run_as_earthkit(input_state, runner, lead_time, extra_metadata):
+    for state in run_as_earthkit(*a, **kw):
         fields.extend(state.fields)
 
     return ekd.SimpleFieldList(fields)
@@ -519,8 +528,8 @@ def collect_as_earthkit(
 @functools.wraps(collect_as_earthkit)
 @mark.needs_gpu
 def collect_as_earthkit_from_config(
-    input_state: dict, config: RunConfiguration, lead_time: Any, extra_metadata: Optional[dict[str, Any]] = None
+    input_state: dict, config: RunConfiguration, **kw
 ) -> ekd.SimpleFieldList:
     """Run from config"""
     runner = CascadeRunner(config)
-    return collect_as_earthkit(input_state, runner, lead_time, extra_metadata)
+    return collect_as_earthkit(input_state, runner, **kw)

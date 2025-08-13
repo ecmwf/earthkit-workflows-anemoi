@@ -60,14 +60,26 @@ class CascadeRunner(Runner):
         Input
             The created input.
         """
-        input: EkdInput = create_input(self, self.config.input)
-        if not isinstance(input, EkdInput):
-            LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
-        # input.variables = input.checkpoint.select_variables(include=["prognostic", "forcing"], exclude=["diagnostic"])
-        input.variables = input.checkpoint.variables_from_input(include_forcings=True)
+        input = create_input(self, self.config.input)
+
+        def set_variables(input: EkdInput) -> EkdInput:
+            """Set the variables for the input."""
+            if not isinstance(input, EkdInput):
+                LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
+            input.variables = input.checkpoint.variables_from_input(include_forcings=True)
+            return input
+
+        from anemoi.inference.inputs.cutout import Cutout
+        if isinstance(input, Cutout): # type: ignore
+            input.sources = {src: set_variables(src_input) for src, src_input in input.sources.items()}
+        elif isinstance(input, EkdInput):
+            input = set_variables(input)
+        # If input is not an instance of EkdInput, we cannot set the variables
+        # but we can still use the input as it is.
+        # This is a fallback for when the input is not an instance of EkdInput.
         LOG.info("Input: %s", input)
         return input
-
+    
     def create_constant_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
         """Create constant computed forcings.
 
@@ -125,6 +137,7 @@ class CascadeRunner(Runner):
         # there are supposed to be already in the state dictionary
         # or managed by the user.
         input = create_input(self, self.config.input)
+        # return []
         result = CoupledForcings(self, input, variables, mask)
         LOG.info("Constant coupled forcing: %s", result)
         return [result]
