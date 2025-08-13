@@ -392,6 +392,7 @@ def convert_to_fieldlist(
     except Exception as e:
         LOG.warning(f"Error converting state to grib, will convert to ArrayField.")
 
+    import numpy as np
     fields = []
 
     step = frequency_to_seconds(state["date"] - initial_date) // 3600
@@ -411,13 +412,14 @@ def convert_to_fieldlist(
                 "shortName": variable.param,
                 "param": variable.param,
                 "latitudes": state['latitudes'],
-                "longitudes": state['longitudes'],
+                "longitudes": np.where(state['longitudes'] > 180, state['longitudes'] - 360, state['longitudes']),
             }
         )
         if 'levtype' in variable.grib_keys:
             metadata["levtype"] = variable.grib_keys["levtype"]
         if  variable.level is not None:
             metadata["level"] = variable.level
+
         fields.append(ekd.ArrayField(array, metadata.copy()))
 
     return ekd.SimpleFieldList.from_fields(fields)
