@@ -339,7 +339,12 @@ def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Gener
 
 
 def convert_to_fieldlist(
-    state: dict, initial_date: datetime.datetime, runner: CascadeRunner, ensemble_member: int | None, templates: list[str] | None = None, **kwargs
+    state: dict,
+    initial_date: datetime.datetime,
+    runner: CascadeRunner,
+    ensemble_member: int | None,
+    templates: list[str] | None = None,
+    **kwargs,
 ) -> ekd.SimpleFieldList:
     """
     Convert the state to an earthkit FieldList.
@@ -386,6 +391,7 @@ def convert_to_fieldlist(
 
     try:
         from anemoi.inference.outputs.gribmemory import GribMemoryOutput
+
         output_kwargs = runner.config.output
         if isinstance(output_kwargs, str):
             output_kwargs = {}
@@ -404,12 +410,13 @@ def convert_to_fieldlist(
         LOG.warning(f"Error converting state to grib, will convert to ArrayField. {e}")
 
     import numpy as np
+
     fields = []
 
     step = frequency_to_seconds(state["date"] - initial_date) // 3600
     variables: dict[str, Variable] = runner.checkpoint.typed_variables
 
-    for var, array in state['fields'].items():
+    for var, array in state["fields"].items():
         variable = variables[var]
         paramId = shortname_to_paramid(variable.param)
 
@@ -417,18 +424,18 @@ def convert_to_fieldlist(
             {
                 "step": step,
                 "base_datetime": initial_date,
-                "valid_datetime": state['date'],
+                "valid_datetime": state["date"],
                 "paramId": paramId,
                 "units": _paramId_to_units(paramId),
                 "shortName": variable.param,
                 "param": variable.param,
-                "latitudes": state['latitudes'],
-                "longitudes": np.where(state['longitudes'] > 180, state['longitudes'] - 360, state['longitudes']),
+                "latitudes": state["latitudes"],
+                "longitudes": np.where(state["longitudes"] > 180, state["longitudes"] - 360, state["longitudes"]),
             }
         )
-        if 'levtype' in variable.grib_keys:
+        if "levtype" in variable.grib_keys:
             metadata["levtype"] = variable.grib_keys["levtype"]
-        if  variable.level is not None:
+        if variable.level is not None:
             metadata["level"] = variable.level
 
         fields.append(ekd.ArrayField(array, metadata.copy()))
@@ -488,16 +495,17 @@ def run_as_earthkit(
 @functools.wraps(run_as_earthkit)
 @mark.needs_gpu
 def run_as_earthkit_from_config(
-    input_state: dict, config: RunConfiguration, **kw,
+    input_state: dict,
+    config: RunConfiguration,
+    **kw,
 ) -> Generator[ekd.SimpleFieldList, None, None]:
-    """Run from config"""
     runner = CascadeRunner(config)
     yield from run_as_earthkit(input_state, runner, **kw)
 
 
 @mark.needs_gpu
 def collect_as_earthkit(
-    *a, **kw
+    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] | None = None
 ) -> ekd.SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
@@ -519,7 +527,7 @@ def collect_as_earthkit(
         Combined FieldList of the model run
     """
     fields = []
-    for state in run_as_earthkit(*a, **kw):
+    for state in run_as_earthkit(input_state, runner, lead_time, extra_metadata):
         fields.extend(state.fields)
 
     return ekd.SimpleFieldList(fields)
@@ -527,9 +535,6 @@ def collect_as_earthkit(
 
 @functools.wraps(collect_as_earthkit)
 @mark.needs_gpu
-def collect_as_earthkit_from_config(
-    input_state: dict, config: RunConfiguration, **kw
-) -> ekd.SimpleFieldList:
-    """Run from config"""
+def collect_as_earthkit_from_config(input_state: dict, config: RunConfiguration, **kw) -> ekd.SimpleFieldList:
     runner = CascadeRunner(config)
     return collect_as_earthkit(input_state, runner, **kw)

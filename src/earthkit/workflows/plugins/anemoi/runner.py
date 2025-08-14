@@ -70,7 +70,8 @@ class CascadeRunner(Runner):
             return input
 
         from anemoi.inference.inputs.cutout import Cutout
-        if isinstance(input, Cutout): # type: ignore
+
+        if isinstance(input, Cutout):  # type: ignore
             input.sources = {src: set_variables(src_input) for src, src_input in input.sources.items()}
         elif isinstance(input, EkdInput):
             input = set_variables(input)
@@ -79,7 +80,7 @@ class CascadeRunner(Runner):
         # This is a fallback for when the input is not an instance of EkdInput.
         LOG.info("Input: %s", input)
         return input
-    
+
     def create_constant_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
         """Create constant computed forcings.
 

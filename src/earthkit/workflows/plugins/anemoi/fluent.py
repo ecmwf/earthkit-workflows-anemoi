@@ -263,7 +263,11 @@ def from_input(
     )
 
     return run_model(
-        runner, config, input_state_source, lead_time, payload_metadata={"environment": environment["inference"]},
+        runner,
+        config,
+        input_state_source,
+        lead_time,
+        payload_metadata={"environment": environment["inference"]},
     )
 
 
