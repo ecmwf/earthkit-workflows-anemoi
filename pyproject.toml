@@ -47,7 +47,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 
-optional-dependencies.tests = [ "pytest", "pytest-mock" ]
+optional-dependencies.tests = [ "pytest", "pytest-mock", "pytest-xdist" ]
 
 [tool.setuptools]
 include-package-data = true
