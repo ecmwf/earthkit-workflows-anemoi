@@ -275,7 +275,6 @@ def from_initial_conditions(
     ckpt: VALID_CKPT,
     initial_conditions: State | fluent.Action | fluent.Payload | Callable,
     lead_time: LEAD_TIME,
-    configuration_kwargs: Optional[dict[str, Any]] = None,
     *,
     ensemble_members: Optional[ENSEMBLE_MEMBER_SPECIFICATION] = None,
     environment: Optional[list[str]] = None,
@@ -296,8 +295,6 @@ def from_initial_conditions(
     lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
-    configuration_kwargs: dict[str, Any]:
-        kwargs for `anemoi.inference` configuration
     ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
         Number of ensemble members to run,
         If initial_conditions is a fluent action, with
@@ -324,8 +321,8 @@ def from_initial_conditions(
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
 
-    config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), **(configuration_kwargs or {}))
-    runner = CascadeRunner(config, **kwargs)
+    config = RunConfiguration(checkpoint=_parse_checkpoint(ckpt), **(kwargs or {}))
+    runner = CascadeRunner(config)
     environment = _crack_environment(environment, ["inference"])
 
     runner.checkpoint.validate_environment(on_difference="warn")

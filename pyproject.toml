@@ -70,4 +70,10 @@ profile = "black"
 log_cli = true
 log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
-addopts = "-n8"
+#addopts = "-n8"
+
+[tool.mypy]
+exclude = [ "docs/" ]
+strict = false
+ignore_missing_imports = true
+allow_redefinition = true

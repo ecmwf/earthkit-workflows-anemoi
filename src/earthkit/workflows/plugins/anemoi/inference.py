@@ -343,7 +343,6 @@ def convert_to_fieldlist(
     initial_date: datetime.datetime,
     runner: CascadeRunner,
     ensemble_member: int | None,
-    templates: list[str] | None = None,
     **kwargs,
 ) -> ekd.SimpleFieldList:
     """
@@ -359,8 +358,6 @@ def convert_to_fieldlist(
         Runner object
     ensemble_member : int | None
         Ensemble member number
-    templates: list[str] | None
-        Templates to use for the output, by default None
     kwargs : dict
         Additional metadata to add to the fields
 
