@@ -2,7 +2,7 @@
   workflows_config: {}
   inference_config: {}
   checks:
-    - check_fieldlist
+    - check_fieldlist: {}
 - name: no-nans
   workflows_config: {}
   inference_config: {}
