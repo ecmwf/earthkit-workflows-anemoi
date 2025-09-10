@@ -10,7 +10,6 @@
 
 import logging
 import time
-from contextlib import contextmanager
 from multiprocessing import Process
 from typing import Any
 
@@ -28,32 +27,9 @@ logger = logging.getLogger(__name__)
 
 def spawn_gateway(max_jobs: int | None = None) -> tuple[str, Process]:
     url = "tcp://localhost:12345"
-    import socket
-
-    def is_port_in_use(port: int) -> bool:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            return s.connect_ex(("localhost", port)) == 0
-
-    if is_port_in_use(12345):
-        return url, None  # type: ignore
-
     p = Process(target=main, args=(url,), kwargs={"max_jobs": max_jobs})
     p.start()
     return url, p
-
-
-@contextmanager
-def executor():
-    url, process = spawn_gateway(max_jobs=1)
-    try:
-        yield url
-    except Exception as e:
-        # NOTE we log like this in case shm shutdown freezes
-        logger.exception(f"gotten {repr(e)}, proceed with shm shutdown")
-        raise
-    finally:
-        if process and process.is_alive():
-            process.kill()
 
 
 def convert_to_job(action: Action) -> JobInstance:
@@ -77,7 +53,7 @@ def convert_to_jobspec(job: JobInstance, *, workers_per_host: int = 1) -> api.Jo
     )
 
 
-def run_job(action: Action, *, url: str | None = None, tries: int = 16) -> Any:
+def run_job(action: Action, *, url: str, tries: int = 16) -> Any:
     """Run a job and return the result."""
     job = convert_to_job(action)
 
@@ -87,25 +63,14 @@ def run_job(action: Action, *, url: str | None = None, tries: int = 16) -> Any:
 
     job_spec = convert_to_jobspec(job)
 
-    if url is None:
-        with executor() as url:
-            submit_job_req = api.SubmitJobRequest(job=job_spec)
-            submit_job_res: api.SubmitJobResponse = client.request_response(submit_job_req, url=url)  # type: ignore
-            job_id = submit_job_res.job_id
+    submit_job_req = api.SubmitJobRequest(job=job_spec)
+    submit_job_res: api.SubmitJobResponse = client.request_response(submit_job_req, url=url)  # type: ignore
+    job_id = submit_job_res.job_id
 
-            assert submit_job_res.error is None
-            assert job_id is not None
+    assert submit_job_res.error is None
+    assert job_id is not None
 
-            result = get_result(job, job_id=job_id, url=url, tries=tries)
-    else:
-        submit_job_req = api.SubmitJobRequest(job=job_spec)
-        submit_job_res: api.SubmitJobResponse = client.request_response(submit_job_req, url=url)  # type: ignore
-        job_id = submit_job_res.job_id
-
-        assert submit_job_res.error is None
-        assert job_id is not None
-
-        result = get_result(job, job_id=job_id, url=url, tries=tries)
+    result = get_result(job, job_id=job_id, url=url, tries=tries)
 
     return result
 

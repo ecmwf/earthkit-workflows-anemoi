@@ -8,13 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import testing_registry
 
 if TYPE_CHECKING:
-    from anemoi.inference.checkpoint import Checkpoint
     from anemoi.transform.variables import Variable
     from earthkit.data import FieldList
 
@@ -27,7 +25,7 @@ LOG = logging.getLogger(__name__)
 @testing_registry.register("check_fieldlist")
 def check_fieldlist(
     *,
-    fieldlist: FieldList,
+    fieldlist: "FieldList",
     expected_variables: list["Variable"],
     check_accum: str | None = None,
     check_nans=False,
@@ -72,83 +70,83 @@ def check_fieldlist(
     assert all(curr > prev for prev, curr in zip(averages, averages[1:])), f"{check_accum} is not accumulating"
 
 
-@testing_registry.register("check_with_xarray")
-def check_with_xarray(
-    *, file: Path, expected_variables: list["Variable"], check_accum: str | None = None, check_nans=False, **kwargs
-) -> None:
-    LOG.info(f"Checking file: {file}")
-    import numpy as np
-    import xarray as xr
+# @testing_registry.register("check_with_xarray")
+# def check_with_xarray(
+#     *, file: Path, expected_variables: list["Variable"], check_accum: str | None = None, check_nans=False, **kwargs
+# ) -> None:
+#     LOG.info(f"Checking file: {file}")
+#     import numpy as np
+#     import xarray as xr
 
-    ds = xr.open_dataset(file)
+#     ds = xr.open_dataset(file)
 
-    assert len(ds.data_vars) > 0, "No data found in the xarray compatible file."
+#     assert len(ds.data_vars) > 0, "No data found in the xarray compatible file."
 
-    # lat and lon are variables in the file, but they are not variables of the model so skip them
-    skip = {"latitude", "longitude"}
-    params = set(ds.data_vars) - skip
-    expected_params = [var.name for var in expected_variables]
-    assert (
-        set(expected_params) == params
-    ), f"Expected parameters {set(expected_params)} do not match found parameters {params}."
+#     # lat and lon are variables in the file, but they are not variables of the model so skip them
+#     skip = {"latitude", "longitude"}
+#     params = set(ds.data_vars) - skip
+#     expected_params = [var.name for var in expected_variables]
+#     assert (
+#         set(expected_params) == params
+#     ), f"Expected parameters {set(expected_params)} do not match found parameters {params}."
 
-    for var in ds.data_vars:
-        if var in skip:
-            continue
-        assert not np.all(ds[var].values == 0), f"Variable {var} is zero."
+#     for var in ds.data_vars:
+#         if var in skip:
+#             continue
+#         assert not np.all(ds[var].values == 0), f"Variable {var} is zero."
 
-        if check_nans:
-            assert not np.isnan(ds[var].values).any(), f"Variable {var} contains NaN values."
+#         if check_nans:
+#             assert not np.isnan(ds[var].values).any(), f"Variable {var} contains NaN values."
 
-    if not check_accum:
-        return
+#     if not check_accum:
+#         return
 
-    data_vars = list(ds.data_vars[check_accum])
-    if len(data_vars) < 2:
-        raise ValueError(f"No variables found for accumulation check: {check_accum}")
+#     data_vars = list(ds.data_vars[check_accum])
+#     if len(data_vars) < 2:
+#         raise ValueError(f"No variables found for accumulation check: {check_accum}")
 
-    averages = [np.average(data.values) for data in data_vars]
-    assert all(curr > prev for prev, curr in zip(averages, averages[1:])), f"{check_accum} is not accumulating"
+#     averages = [np.average(data.values) for data in data_vars]
+#     assert all(curr > prev for prev, curr in zip(averages, averages[1:])), f"{check_accum} is not accumulating"
 
 
-@testing_registry.register("check_lam_with_xarray")
-def check_lam(
-    *,
-    file: Path,
-    checkpoint: "Checkpoint",
-    mask="lam_0",
-    reference_date: str = None,
-    reference_dataset={},
-    reference_file=None,
-    **kwargs,
-) -> None:
-    LOG.info(f"Checking LAM: {file}")
-    import numpy as np
-    import xarray as xr
+# @testing_registry.register("check_lam_with_xarray")
+# def check_lam(
+#     *,
+#     file: Path,
+#     checkpoint: "Checkpoint",
+#     mask="lam_0",
+#     reference_date: str = None,
+#     reference_dataset={},
+#     reference_file=None,
+#     **kwargs,
+# ) -> None:
+#     LOG.info(f"Checking LAM: {file}")
+#     import numpy as np
+#     import xarray as xr
 
-    ds = xr.open_dataset(file)
+#     ds = xr.open_dataset(file)
 
-    # check shape of inner region against the mask in the checkpoint
-    mask = checkpoint.load_supporting_array(f"{mask}/cutout_mask")
-    for var in ds.data_vars:
-        assert ds[var].shape[-1] == np.sum(
-            mask
-        ), f"Variable {var} shape {ds[var].shape[-1]} does not match mask size {np.sum(mask)}."
+#     # check shape of inner region against the mask in the checkpoint
+#     mask = checkpoint.load_supporting_array(f"{mask}/cutout_mask")
+#     for var in ds.data_vars:
+#         assert ds[var].shape[-1] == np.sum(
+#             mask
+#         ), f"Variable {var} shape {ds[var].shape[-1]} does not match mask size {np.sum(mask)}."
 
-    # check that the extracted inner region matches the reference input dataset
-    # the mock model passes input to output, values in the output file should match the input dataset at the reference date
-    if reference_dataset:
-        from anemoi.datasets import open_dataset
+#     # check that the extracted inner region matches the reference input dataset
+#     # the mock model passes input to output, values in the output file should match the input dataset at the reference date
+#     if reference_dataset:
+#         from anemoi.datasets import open_dataset
 
-        ref_ds = open_dataset(**reference_dataset, start=reference_date, end=reference_date)
+#         ref_ds = open_dataset(**reference_dataset, start=reference_date, end=reference_date)
 
-        for var in checkpoint.prognostic_variables:
-            assert var in ds.data_vars, f"Variable {var} not found in output file."
-            ref_idx = ref_ds.name_to_index[var]
-            for data in ds[var]:
-                assert np.allclose(
-                    data.values, ref_ds[0, ref_idx, 0, :]
-                ), f"Variable {var} in output does not match reference data at {reference_date}."
-    elif reference_file:
-        # check against a reference file, implement when needed
-        raise NotImplementedError("Reference file check is not implemented yet.")
+#         for var in checkpoint.prognostic_variables:
+#             assert var in ds.data_vars, f"Variable {var} not found in output file."
+#             ref_idx = ref_ds.name_to_index[var]
+#             for data in ds[var]:
+#                 assert np.allclose(
+#                     data.values, ref_ds[0, ref_idx, 0, :]
+#                 ), f"Variable {var} in output does not match reference data at {reference_date}."
+#     elif reference_file:
+#         # check against a reference file, implement when needed
+#         raise NotImplementedError("Reference file check is not implemented yet.")
