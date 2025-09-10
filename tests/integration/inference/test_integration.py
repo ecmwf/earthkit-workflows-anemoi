@@ -25,7 +25,7 @@ import earthkit.workflows.plugins.anemoi.fluent as wa_fluent
 from earthkit.workflows.plugins.anemoi.testing import testing_registry
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
-from ...executor import run_job
+from ..executor import run_job
 
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger(__name__)
