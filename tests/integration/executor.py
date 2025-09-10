@@ -43,7 +43,7 @@ def convert_to_job(action: Action) -> JobInstance:
     return job
 
 
-def convert_to_jobspec(job: JobInstance, *, workers_per_host: int = 1) -> api.JobSpec:
+def convert_to_jobspec(job: JobInstance, *, workers_per_host: int = 4) -> api.JobSpec:
     return api.JobSpec(
         envvars={},
         workers_per_host=workers_per_host,

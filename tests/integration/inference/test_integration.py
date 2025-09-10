@@ -11,6 +11,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import sleep
 from typing import NamedTuple
 
 import numpy as np
@@ -170,3 +171,5 @@ def test_integration(test_setup: Setup, shared_gateway: str) -> None:
             checkpoint=checkpoint,
             **kwargs,
         )
+
+    sleep(5)  # wait a bit before shutting down the gateway to avoid issues with shm cleanup
