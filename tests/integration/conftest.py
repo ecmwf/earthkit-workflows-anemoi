@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from time import sleep
 
 import pytest
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 def shared_gateway():
     """Shared gateway process and URL for all tests to avoid ZMQ conflicts."""
     url, process = spawn_gateway(max_jobs=4)
+    sleep(5)
     try:
         yield url
     except Exception as e:

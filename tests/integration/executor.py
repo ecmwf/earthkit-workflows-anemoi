@@ -16,7 +16,7 @@ from typing import Any
 
 import cascade.gateway.api as api
 import cascade.gateway.client as client
-from cascade.gateway.__main__ import main
+from cascade.gateway.server import serve
 from cascade.low import views as cascade_views
 from cascade.low.core import JobInstance
 from earthkit.workflows.fluent import Action
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def spawn_gateway(max_jobs: int | None = None) -> tuple[str, Process]:
     url = f"tcp://localhost:{random.randint(12000, 32000)}"
-    p = Process(target=main, args=(url,), kwargs={"max_jobs": max_jobs})
+    p = Process(target=serve, args=(url,), kwargs={"max_jobs": max_jobs})
     p.start()
     return url, p
 
@@ -89,8 +89,7 @@ def get_result(job: JobInstance, job_id, url: str, *, tries=16) -> Any:
         if is_computed and is_datasets:
             break
         else:
-            # NOTE not using logger, not properly configured in downstream-ci
-            print(f"current progress is {job_progress_res}")
+            logger.info(f"current progress is {job_progress_res}")
             if job_progress_res.progresses[job_id].started:
                 tries -= 1
             time.sleep(1)
