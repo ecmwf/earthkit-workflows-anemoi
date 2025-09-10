@@ -9,6 +9,7 @@
 
 
 import logging
+import random
 import time
 from multiprocessing import Process
 from typing import Any
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def spawn_gateway(max_jobs: int | None = None) -> tuple[str, Process]:
-    url = "tcp://localhost:12345"
+    url = f"tcp://localhost:{random.randint(12000, 32000)}"
     p = Process(target=main, args=(url,), kwargs={"max_jobs": max_jobs})
     p.start()
     return url, p
