@@ -89,10 +89,10 @@ def get_result(job: JobInstance, job_id, url: str, *, tries=16) -> Any:
         if is_computed and is_datasets:
             break
         else:
-            if tries % 5 == 0:
-                logger.info(f"{tries}: Current progress is {job_progress_res}")
             if job_progress_res.progresses[job_id].started:
                 tries -= 1
+            if tries % 5 == 0:
+                logger.info(f"{tries} secs remaining: Current progress is {job_progress_res}")
             time.sleep(1)
     assert tries > 0, "Exhausted all tries waiting for job to complete"
 
