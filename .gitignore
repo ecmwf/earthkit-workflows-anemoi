@@ -193,7 +193,6 @@ bar
 *.grib
 *.nc
 *.npz
-*.json
 *.zarr/
 ~$images.pptx
 test.py
