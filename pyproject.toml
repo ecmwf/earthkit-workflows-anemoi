@@ -72,7 +72,7 @@ profile = "black"
 log_cli = true
 log_cli_level = "INFO"
 testpaths = [ "tests/" ]
-addopts = "-n0 -s"       # NOTE stick to 0 *or* have random server ports in the integration tests
+addopts = "-n0"          # NOTE stick to 0 *or* have random server ports in the integration tests
 
 [tool.mypy]
 exclude = [ "docs/" ]

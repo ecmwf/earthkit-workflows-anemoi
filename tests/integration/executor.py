@@ -89,7 +89,8 @@ def get_result(job: JobInstance, job_id, url: str, *, tries=16) -> Any:
         if is_computed and is_datasets:
             break
         else:
-            logger.info(f"current progress is {job_progress_res}")
+            if tries % 5:
+                logger.info(f"{tries}: Current progress is {job_progress_res}")
             if job_progress_res.progresses[job_id].started:
                 tries -= 1
             time.sleep(1)
