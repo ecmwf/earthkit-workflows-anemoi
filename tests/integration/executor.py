@@ -82,7 +82,7 @@ def get_result(job: JobInstance, job_id, url: str, *, tries=16) -> Any:
     job_progress_req = api.JobProgressRequest(job_ids=[job_id])
 
     while tries > 0:
-        job_progress_res: api.JobProgressResponse = client.request_response(job_progress_req, url)
+        job_progress_res: api.JobProgressResponse = client.request_response(job_progress_req, url, timeout_ms=4000)
         assert job_progress_res.error is None
         is_computed = job_progress_res.progresses[job_id].pct == "100.00"
         is_datasets = job.ext_outputs[0] in job_progress_res.datasets[job_id]
