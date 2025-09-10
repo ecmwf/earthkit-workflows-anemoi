@@ -24,7 +24,7 @@ from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 def mock_config(tmp_path: Path):
     import yaml
 
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent.absolute()
     config_path = parent_dir / "configs" / "simple.yaml"
 
     config_dict = yaml.safe_load(config_path.read_text())

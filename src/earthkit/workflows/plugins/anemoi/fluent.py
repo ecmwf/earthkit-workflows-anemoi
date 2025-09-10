@@ -628,8 +628,7 @@ class Action(fluent.Action):
         self,
         ckpt: VALID_CKPT,
         lead_time: LEAD_TIME,
-        configuration_kwargs: Optional[dict[str, Any]] = None,
-        environment: list[str] = None,
+        environment: list[str] | None = None,
         **kwargs,
     ) -> fluent.Action:
         """
@@ -642,8 +641,6 @@ class Action(fluent.Action):
         lead_time : LEAD_TIME
             Lead time to run out to. Can be a string,
             i.e. `1H`, `1D`, int, or a datetime.timedelta
-        configuration_kwargs: dict[str, Any]:
-            kwargs for anemoi.inference configuration
         environment : Optional[list[str]], optional
             Environment to run the model in, by default None
             If None, will use the current environment
@@ -658,9 +655,7 @@ class Action(fluent.Action):
         fluent.Action
             Cascade action of the model results
         """
-        return from_initial_conditions(
-            ckpt, self, lead_time, configuration_kwargs=configuration_kwargs, environment=environment, **kwargs
-        )
+        return from_initial_conditions(ckpt, self, lead_time, environment=environment, **kwargs)
 
 
 fluent.Action.register("anemoi", Action)
