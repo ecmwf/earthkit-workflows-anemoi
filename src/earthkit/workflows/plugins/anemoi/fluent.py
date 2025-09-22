@@ -187,7 +187,7 @@ def from_config(
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input_state_source = get_initial_conditions_source(
-        config=configuration,  # type: ignore
+        config=configuration,
         date=date or configuration.date,
         ensemble_members=ensemble_members,
         payload_metadata={"environment": environment["initial_conditions"]},
@@ -256,9 +256,9 @@ def from_input(
     runner.checkpoint.validate_environment(on_difference="warn")
 
     input_state_source = get_initial_conditions_source(
+        config=config,
         date=date,
         ensemble_members=ensemble_members,
-        config=config,
         payload_metadata={"environment": environment["initial_conditions"]},
     )
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 import datetime
 import functools
 import logging
-import os
 from io import BytesIO
 from typing import TYPE_CHECKING
 from typing import Any
@@ -67,16 +66,13 @@ def _get_initial_conditions_ens(input: Input, ens_mem: int, date: DATE) -> State
 
 def _get_initial_conditions_from_config(config: RunConfiguration, date: DATE, ens_mem: Optional[int] = None) -> State:
     """Get initial conditions for the model"""
+
     runner = CascadeRunner(config)
     input = runner.create_input()
 
-    if hasattr(runner.config, "env"):
-        # Set environment variables found in the configuration
-        for key, value in runner.config.env.items():
-            os.environ[key] = str(value)
-
     if ens_mem is not None and ens_mem >= 1:
         state = _get_initial_conditions_ens(input, ens_mem, date)
+
     state = _get_initial_conditions(input, date)
     state.pop("_grib_templates_for_output", None)
     return state
@@ -465,10 +461,6 @@ def run_as_earthkit(
     Generator[SimpleFieldList, None, None]
         State of the model at each time step
     """
-    if hasattr(runner.config, "env"):
-        # Set environment variables found in the configuration
-        for key, value in runner.config.env.items():
-            os.environ[key] = str(value)
 
     initial_date: datetime.datetime = input_state["date"]
     ensemble_member = input_state.get("ensemble_member", None)
