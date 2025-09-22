@@ -16,6 +16,7 @@ Used for when providing initial conditions
 from __future__ import annotations
 
 import logging
+import os
 from typing import List
 
 from anemoi.inference.config.run import RunConfiguration
@@ -40,6 +41,10 @@ class CascadeRunner(Runner):
             config = RunConfiguration(**config)
 
         self.config = config
+
+        for key, val in config.env.items():
+            LOG.debug("Setting environment variable %s=%s", key, val)
+            os.environ[key] = str(val)
 
         super().__init__(
             config.checkpoint,  # type: ignore # Error in anemoi.inference
