@@ -98,7 +98,7 @@ def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> 
     if isinstance(ensemble_members, int):
         if ensemble_members < 1:
             raise ValueError("Number of ensemble members must be greater than 0.")
-        return list(range(ensemble_members))
+        return list(range(1, ensemble_members + 1))
     return list(ensemble_members)
 
 
@@ -386,6 +386,7 @@ def convert_to_fieldlist(
                 "type": "pf",
                 "stream": "enfo",
                 "number": ensemble_member,
+                # "model" : runner.config.description or f"ai-{str(runner.config.checkpoint)}",
             }
         )
     metadata.update(kwargs)
@@ -400,15 +401,15 @@ def convert_to_fieldlist(
             output_kwargs = output_kwargs.copy().get("out", {})
 
         target = BytesIO()
-        output = GribMemoryOutput(runner, out=target, grib2_keys=metadata, **output_kwargs)
+        output = GribMemoryOutput(runner, out=target, encoding=metadata, **output_kwargs)
         output.write_state(state)
 
         target.seek(0, 0)
         fieldlist: ekd.SimpleFieldList = ekd.from_source("stream", target, read_all=True)  # type: ignore
         return fieldlist
 
-    except Exception as e:
-        LOG.warning(f"Error converting state to grib, will convert to ArrayField. {e}")
+    except Exception:
+        LOG.error("Error converting state to grib, will convert to ArrayField.", exc_info=True)
 
     import numpy as np
 
