@@ -382,6 +382,7 @@ def convert_to_fieldlist(
     if ensemble_member is not None and ensemble_member >= 1:
         metadata.update(
             {
+                "productDefinitionTemplateNumber": 1,
                 "type": "pf",
                 "stream": "enfo",
                 "number": ensemble_member,
