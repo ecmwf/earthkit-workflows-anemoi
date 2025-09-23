@@ -164,7 +164,7 @@ def get_initial_conditions_source(
                     for ens_mem in ens_members
                 ],
             ],  # type: ignore
-            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
+            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
         )
 
     if isinstance(config, fluent.Action):
@@ -191,7 +191,7 @@ def get_initial_conditions_source(
     expanded_init = single_init.transform(
         _transform_fake,
         list(zip(ens_members)),
-        (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
+        (ENSEMBLE_DIMENSION_NAME, ens_members),  # type: ignore
     )
     if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
         expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
