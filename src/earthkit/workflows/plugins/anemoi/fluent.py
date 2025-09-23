@@ -131,7 +131,7 @@ def from_config(
     overrides: Optional[dict[str, Any]] = None,
     *,
     date: Optional[DATE] = None,
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     environment: ENVIRONMENT = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -147,7 +147,7 @@ def from_config(
     date : Optional[DATE], optional
         Specific override for date, by default None
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
-        Number of ensemble members to run, by default 1
+        Number of ensemble members to run, None will run a single instance, by default None
     environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
@@ -208,7 +208,7 @@ def from_input(
     date: DATE,
     lead_time: LEAD_TIME,
     *,
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     environment: ENVIRONMENT = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -228,7 +228,7 @@ def from_input(
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to run, by default 1
+        Number of ensemble members to run, None will run a single instance, by default None
     environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
@@ -277,7 +277,7 @@ def from_initial_conditions(
     lead_time: LEAD_TIME,
     configuration_kwargs: Optional[dict[str, Any]] = None,
     *,
-    ensemble_members: Optional[ENSEMBLE_MEMBER_SPECIFICATION] = None,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     environment: Optional[list[str]] = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -303,7 +303,6 @@ def from_initial_conditions(
         If initial_conditions is a fluent action, with
         multiple ensemble members, this argument can be set to None,
         and the number of ensemble members will be inferred from the action.
-        If not set, the number of ensemble members will default to 1.
         by default None.
     environment : Optional[list[str]], optional
         Environment to run the model in, by default None
@@ -497,7 +496,7 @@ def from_dataset(
     date: DATE,
     lead_time: LEAD_TIME,
     *,
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     input_template: Optional[dict[str, Any]] = None,
     number_of_dataset_tasks: Optional[int] = None,
     environment: ENVIRONMENT = None,
@@ -521,7 +520,7 @@ def from_dataset(
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to run, by default 1
+        Number of ensemble members to run, None will run a single instance, by default None
     input_template : Optional[dict[str, Any]], optional
         Template of input to use for inference, by default None
         Use "%DATASET_PATH%" to mark where the dataset path should be inserted

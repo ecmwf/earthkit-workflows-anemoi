@@ -46,7 +46,6 @@ def _get_initial_conditions(input: Input, date: DATE) -> State:
     """Get initial conditions for the model"""
     input_state = input.create_input_state(date=to_datetime(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
-
     return input_state
 
 
@@ -70,7 +69,7 @@ def _get_initial_conditions_from_config(config: RunConfiguration, date: DATE, en
     runner = CascadeRunner(config)
     input = runner.create_input()
 
-    if ens_mem is not None and ens_mem >= 1:
+    if ens_mem is not None:
         state = _get_initial_conditions_ens(input, ens_mem, date)
 
     state = _get_initial_conditions(input, date)
@@ -78,19 +77,22 @@ def _get_initial_conditions_from_config(config: RunConfiguration, date: DATE, en
     return state
 
 
-def _transform_fake(act: fluent.Action, ens_num: int) -> fluent.Action:
+def _transform_fake(act: fluent.Action, ens_num: Optional[int] = None) -> fluent.Action:
     """Transform the action to simulate ensemble members"""
 
-    def _empty_payload(x, ens_mem: int):
+    def _empty_payload(x, ens_mem: Optional[int]):
         assert isinstance(x, dict), "Input state must be a dictionary"
-        x["ensemble_member"] = ens_mem
+        if ens_mem is not None:
+            x["ensemble_member"] = ens_mem
         return x
 
     return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
 
 
-def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int]:
+def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> list[int] | list[None]:
     """Parse ensemble members"""
+    if ensemble_members is None:
+        return [None]
     if isinstance(ensemble_members, int):
         if ensemble_members < 1:
             raise ValueError("Number of ensemble members must be greater than 0.")
@@ -130,8 +132,10 @@ def get_initial_conditions_source(
     fluent.Action
         Fluent action of the initial conditions
     """
-    ensemble_members = _parse_ensemble_members(ensemble_members)
+    ens_members = _parse_ensemble_members(ensemble_members)
     if initial_condition_perturbation:
+        if any(ens is None for ens in ens_members):
+            raise ValueError("Ensemble members must be specified when using initial condition perturbation.")
         if isinstance(config, fluent.Action):
             init_conditions = config.transform(
                 lambda x, *a: x.map(
@@ -142,8 +146,8 @@ def get_initial_conditions_source(
                         metadata=payload_metadata,
                     )
                 ),
-                params=ensemble_members,
-                dim=(ENSEMBLE_DIMENSION_NAME, ensemble_members),
+                params=ens_members,
+                dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
             )
             init_conditions._add_dimension("date", [to_datetime(date)])
             return init_conditions
@@ -157,10 +161,10 @@ def get_initial_conditions_source(
                         kwargs=dict(config=config, date=date, ens_mem=ens_mem),
                         metadata=payload_metadata,
                     )
-                    for ens_mem in ensemble_members
+                    for ens_mem in ens_members
                 ],
             ],  # type: ignore
-            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ensemble_members},
+            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
         )
 
     if isinstance(config, fluent.Action):
@@ -186,8 +190,8 @@ def get_initial_conditions_source(
     # Wrap with empty payload to simulate ensemble members
     expanded_init = single_init.transform(
         _transform_fake,
-        list(zip(ensemble_members)),
-        (ENSEMBLE_DIMENSION_NAME, ensemble_members),  # type: ignore
+        list(zip(ens_members)),
+        (ENSEMBLE_DIMENSION_NAME, ens_members),  # type: ignore
     )
     if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
         expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
@@ -339,7 +343,6 @@ def convert_to_fieldlist(
     initial_date: datetime.datetime,
     runner: CascadeRunner,
     ensemble_member: int | None,
-    templates: list[str] | None = None,
     **kwargs,
 ) -> ekd.SimpleFieldList:
     """
@@ -355,8 +358,6 @@ def convert_to_fieldlist(
         Runner object
     ensemble_member : int | None
         Ensemble member number
-    templates: list[str] | None
-        Templates to use for the output, by default None
     kwargs : dict
         Additional metadata to add to the fields
 
@@ -375,7 +376,7 @@ def convert_to_fieldlist(
             "class": "ai",
         }
     )
-    if ensemble_member is not None and ensemble_member >= 1:
+    if ensemble_member is not None:
         metadata.update(
             {
                 "productDefinitionTemplateNumber": 1,
