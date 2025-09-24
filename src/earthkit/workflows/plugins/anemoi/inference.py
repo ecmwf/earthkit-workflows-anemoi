@@ -103,7 +103,7 @@ def _parse_ensemble_members(ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION) -> 
 def get_initial_conditions_source(
     config: RunConfiguration | fluent.Action,
     date: DATE,
-    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = 1,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     *,
     initial_condition_perturbation: bool = False,
     payload_metadata: Optional[dict[str, Any]] = None,
@@ -119,7 +119,7 @@ def get_initial_conditions_source(
     date : str | tuple[int, int, int]
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to get, by default 1
+        Number of ensemble members to get, by default None
     initial_condition_perturbation : bool, optional
         Whether to get perturbed initial conditions, by default False
         If False, only one initial condition is returned, and

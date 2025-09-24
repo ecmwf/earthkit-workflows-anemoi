@@ -19,5 +19,5 @@ LEAD_TIME = Union[int, str, datetime.timedelta]
 DATE = Union[datetime.datetime, tuple[int, int, int], str]
 ENVIRONMENT = Optional[Union[dict[str, list[str]], list[str]]]
 
-ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
+ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int], None]
 ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"
