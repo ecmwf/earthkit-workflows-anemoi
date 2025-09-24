@@ -1,0 +1,20 @@
+- name: expected-variables
+  workflows_config: {}
+  inference_config: {}
+  checks:
+    - check_fieldlist: {}
+- name: no-nans
+  workflows_config: {}
+  inference_config: {}
+  checks:
+    - check_fieldlist:
+        check_nans: true
+- name: inference-post_processors-accum
+  workflows_config: {}
+  inference_config:
+    post_processors:
+      - accumulate_from_start_of_forecast
+  checks:
+    - check_fieldlist:
+        check_accum: tp
+        check_nans: true

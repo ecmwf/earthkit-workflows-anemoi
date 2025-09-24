@@ -25,7 +25,7 @@ from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 @fake_checkpoints
 def mock_config():
     return MockRunConfiguration.load(
-        (Path(__file__).parent / "configs/simple.yaml").absolute(),
+        str((Path(__file__).parent / "configs/simple.yaml").absolute()),
         overrides=dict(runner="testing", device="cpu"),
     )
 

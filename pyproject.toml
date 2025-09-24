@@ -37,6 +37,8 @@ dependencies = [
   "anemoi-inference>=0.7",
   "earthkit-workflows>=0.4.1",
 ]
+optional-dependencies.all = [ "earthkit-workflows-anemoi[tests]" ]
+
 optional-dependencies.docs = [
   "autodoc-pydantic",
   "nbsphinx",
@@ -68,6 +70,12 @@ profile = "black"
 
 [tool.pytest.ini_options]
 log_cli = true
-log_cli_level = "DEBUG"
+log_cli_level = "INFO"
 testpaths = [ "tests/" ]
-addopts = "-n8"
+addopts = "-n0"          # NOTE stick to 0 *or* have random server ports in the integration tests
+
+[tool.mypy]
+exclude = [ "docs/" ]
+strict = false
+ignore_missing_imports = true
+allow_redefinition = true
