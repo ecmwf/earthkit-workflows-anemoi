@@ -52,7 +52,6 @@ class CascadeRunner(Runner):
             precision=config.precision,
             allow_nans=config.allow_nans,
             verbosity=config.verbosity,
-            report_error=config.report_error,
             patch_metadata=config.patch_metadata,
             typed_variables=config.typed_variables,
         )
