@@ -64,13 +64,12 @@ class CascadeRunner(Runner):
         Input
             The created input.
         """
-        input = create_input(self, self.config.input)
+        input = create_input(self, self.config.input, variables = self.checkpoint.select_variables(include=["prognostic", "forcing"]))
 
         def set_variables(input: EkdInput) -> EkdInput:
             """Set the variables for the input."""
             if not isinstance(input, EkdInput):
                 LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
-            input.variables = input.checkpoint.variables_from_input(include_forcings=True)
             return input
 
         from anemoi.inference.inputs.cutout import Cutout
@@ -141,7 +140,7 @@ class CascadeRunner(Runner):
         # This runner does not support coupled forcings
         # there are supposed to be already in the state dictionary
         # or managed by the user.
-        input = create_input(self, self.config.input)
+        input = create_input(self, self.config.input, variables = self.checkpoint.select_variables(include=["constant", "forcing"]))
         # return []
         result = CoupledForcings(self, input, variables, mask)
         LOG.info("Constant coupled forcing: %s", result)

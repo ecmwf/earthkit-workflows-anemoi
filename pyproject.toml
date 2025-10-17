@@ -34,7 +34,7 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anemoi-datasets>=0.5.21",
-  "anemoi-inference>=0.7,<0.8",
+  "anemoi-inference>=0.7",
   "earthkit-workflows>=0.4.1",
 ]
 optional-dependencies.docs = [
