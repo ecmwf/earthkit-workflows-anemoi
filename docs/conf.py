@@ -42,7 +42,7 @@ copyright = "%s, ECMWF" % (years,)
 
 
 try:
-    from anemoi.inference._version import __version__
+    from earthkit.workflows.plugins.anemoi._version import __version__
 
     release = __version__
 except ImportError:
