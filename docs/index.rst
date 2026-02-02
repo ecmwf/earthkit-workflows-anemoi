@@ -70,6 +70,7 @@ License`__.
    :caption: Usage
 
    usage/inference
+   usage/expansion
 
 .. toctree::
    :maxdepth: 1
@@ -78,3 +79,4 @@ License`__.
 
    api/fluent
    api/inference
+   api/utils
