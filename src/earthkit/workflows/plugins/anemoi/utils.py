@@ -241,12 +241,13 @@ class Expansion:
                 return action
 
             if num_children == 1:  # In the case of one child, no need to split, just continue expanding
-                child = qube.children[0]
-                return expand_fn(action, child, path)
+                return expand_fn(action, qube.children[0], path)
 
             action = action.split(
                 {
-                    f"{path}/{get_name(child, i)}": Payload(select, kwargs={"key": child.key, "val": child.values})
+                    f"{path}/{get_name(child, i)}": Payload(
+                        select, kwargs={"key": child.key, "val": list(child.values)}
+                    )
                     for i, child in enumerate(qube.children)
                 }
             )
@@ -343,6 +344,7 @@ def expansion_coordinates(metadata: "Metadata", lead_time: int | str | timedelta
         [
             {
                 "step": steps,
+                "levtype": "pl",
                 "param": var.param,
                 "level": var.level,
             }
@@ -355,6 +357,7 @@ def expansion_coordinates(metadata: "Metadata", lead_time: int | str | timedelta
         [
             {
                 "step": steps,
+                "levtype": "ml",
                 "param": var.param,
                 "level": var.level,
             }
@@ -367,6 +370,7 @@ def expansion_coordinates(metadata: "Metadata", lead_time: int | str | timedelta
         [
             {
                 "step": steps,
+                "levtype": "sfc",
                 "param": var.param,
             }
             for var in surface_variables
