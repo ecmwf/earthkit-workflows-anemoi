@@ -14,7 +14,7 @@ import pytest
 from qubed import Qube
 
 from earthkit.workflows.plugins.anemoi.utils import Expansion
-from earthkit.workflows.plugins.anemoi.utils import convert_num_to_abc
+from earthkit.workflows.plugins.anemoi.utils import _convert_num_to_abc
 
 # ============================================================================
 # Fixtures for creating test qubes
@@ -165,7 +165,7 @@ def mock_action():
 )
 def test_convert_num_to_abc(num, expected):
     """Test number to alphabetical conversion."""
-    assert convert_num_to_abc(num) == expected
+    assert _convert_num_to_abc(num) == expected
 
 
 # ============================================================================
