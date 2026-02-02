@@ -9,9 +9,9 @@
 
 import datetime
 import os
+from collections.abc import Sequence
 from typing import Any
 from typing import Optional
-from typing import Sequence
 from typing import Union
 
 VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]

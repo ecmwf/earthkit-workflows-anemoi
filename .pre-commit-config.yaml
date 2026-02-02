@@ -75,5 +75,11 @@ repos:
         - --check-protected  # Check protected methods
         - --check-class      # Check class docstrings
         - --disable=E113     # Disable empty docstrings
+- repo: https://github.com/asottile/pyupgrade
+  rev: v3.21.2
+  hooks:
+  - id: pyupgrade
+    args:
+    - --py310-plus
 ci:
   autoupdate_schedule: monthly
