@@ -29,7 +29,7 @@ from earthkit.workflows import fluent
 from earthkit.workflows import mark
 from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
-from earthkit.workflows.plugins.anemoi.utils import expansion_coordinates
+from earthkit.workflows.plugins.anemoi.utils import expansion_qube
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
@@ -239,9 +239,9 @@ def run_model(
         metadata=payload_metadata,
     )
 
-    expandantor = expansion_coordinates(runner.checkpoint._metadata, lead_time)
-    model_results = input_state_source.map(model_payload, yields=("step", list(expandantor.axes()["step"])))
-    return expandantor.drop_axis("step").expand(model_results)
+    qube = expansion_qube(runner.checkpoint._metadata, lead_time)
+    model_results = input_state_source.map(model_payload, yields=("step", list(qube.axes()["step"])))
+    return model_results.expand_as_qube(qube.remove_by_key("step"))
 
 
 def run(input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME) -> Generator[Any]:

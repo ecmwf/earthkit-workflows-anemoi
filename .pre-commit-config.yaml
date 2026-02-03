@@ -80,6 +80,6 @@ repos:
   hooks:
   - id: pyupgrade
     args:
-    - --py310-plus
+    - --py311-plus
 ci:
   autoupdate_schedule: monthly
