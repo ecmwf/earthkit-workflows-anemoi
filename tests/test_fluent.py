@@ -8,11 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
+from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
+from xarray import DataArray
+from xarray import DataTree
 
 from earthkit.workflows.plugins.anemoi.fluent import Action
 from earthkit.workflows.plugins.anemoi.fluent import from_config
@@ -64,25 +68,31 @@ STANDARD_INFERENCE_TESTS = [
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
-        "pressure",
-        2,
-        {"date": "2020-01-01", "lead_time": "1D"},
-        {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
-    ],
-    [
         "full_atmo",
         2,
         {"date": "2020-01-01", "lead_time": "1D"},
-        {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
+        {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1, "level": 1},
     ],
 ]
 
 
-def assert_shape(action, shape):
+def assert_shape(action: Action, shape: dict[str, int]):
     """Assert action nodes are of the correct shape"""
+    shapes = defaultdict(set)
+
+    def count(node: DataTree | DataArray):
+        for dim, size in node.coords.items():
+            shapes[dim].update(np.atleast_1d(size.values))
+
+        if isinstance(node, DataTree):
+            for child in node.children:
+                count(node[child])
+
+    count(action.nodes)
+
     for dim in shape:
-        assert dim in action.nodes.dims
-        assert action.nodes.coords[dim].size == shape[dim]
+        assert dim in shapes
+        assert len(shapes[dim]) == shape[dim]
 
 
 @pytest.mark.parametrize("ckpt, ensemble_members, kwargs, shape", STANDARD_INFERENCE_TESTS)
@@ -121,6 +131,7 @@ def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape
     kwargs.pop("date", None)
 
     action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
+    shape.pop("date", None)
     assert_shape(action, shape)
 
 

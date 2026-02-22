@@ -13,6 +13,11 @@ config:
 data_indices:
   data:
     input:
+      prognostic:
+      - 0
+      - 1
+      - 2
+      - 3
       diagnostic:
       - 6
       - 7
@@ -21,11 +26,15 @@ data_indices:
       - 5
       - 8
       - 9
-      prognostic:
+      full:
       - 0
       - 1
       - 2
       - 3
+      - 4
+      - 5
+      - 8
+      - 9
     output:
       full:
       - 0

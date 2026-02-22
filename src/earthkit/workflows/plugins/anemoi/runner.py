@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List
 
 from anemoi.inference.config.run import RunConfiguration
 from anemoi.inference.forcings import ComputedForcings
@@ -83,10 +82,10 @@ class CascadeRunner(Runner):
         # If input is not an instance of EkdInput, we cannot set the variables
         # but we can still use the input as it is.
         # This is a fallback for when the input is not an instance of EkdInput.
-        LOG.info("Input: %s", input)
+        LOG.debug("Input: %s", input)
         return input
 
-    def create_constant_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+    def create_constant_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
         """Create constant computed forcings.
 
         Parameters
@@ -102,10 +101,10 @@ class CascadeRunner(Runner):
             The created constant computed forcings.
         """
         result = ComputedForcings(self, variables, mask)
-        LOG.info("Constant computed forcing: %s", result)
+        LOG.debug("Constant computed forcing: %s", result)
         return [result]
 
-    def create_dynamic_computed_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+    def create_dynamic_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
         """Create dynamic computed forcings.
 
         Parameters
@@ -121,10 +120,10 @@ class CascadeRunner(Runner):
             The created dynamic computed forcings.
         """
         result = ComputedForcings(self, variables, mask)
-        LOG.info("Dynamic computed forcing: %s", result)
+        LOG.debug("Dynamic computed forcing: %s", result)
         return [result]
 
-    def create_constant_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+    def create_constant_coupled_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
         """Create constant coupled forcings.
 
         Parameters
@@ -147,10 +146,10 @@ class CascadeRunner(Runner):
         )
         # return []
         result = CoupledForcings(self, input, variables, mask)
-        LOG.info("Constant coupled forcing: %s", result)
+        LOG.debug("Constant coupled forcing: %s", result)
         return [result]
 
-    def create_dynamic_coupled_forcings(self, variables: List[str], mask: IntArray) -> List[Forcings]:
+    def create_dynamic_coupled_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
         """Create dynamic coupled forcings.
 
         Parameters
@@ -171,7 +170,7 @@ class CascadeRunner(Runner):
         LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
         return []
 
-    def create_post_processors(self) -> List[Processor]:
+    def create_post_processors(self) -> list[Processor]:
         """Create post-processors.
 
         Returns
@@ -183,5 +182,5 @@ class CascadeRunner(Runner):
         for processor in self.config.post_processors:
             result.append(create_post_processor(self, processor))
 
-        LOG.info("Post processors: %s", result)
+        LOG.debug("Post processors: %s", result)
         return result

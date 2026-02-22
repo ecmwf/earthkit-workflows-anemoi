@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
-from typing import Optional
 from typing import TypeVar
 
 from anemoi.inference.checkpoint import Checkpoint
@@ -128,9 +127,9 @@ def _crack_environment(environment: ENVIRONMENT, keys: list[str]) -> dict[str, l
 
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
-    overrides: Optional[dict[str, Any]] = None,
+    overrides: dict[str, Any] | None = None,
     *,
-    date: Optional[DATE] = None,
+    date: DATE | None = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
     environment: ENVIRONMENT = None,
     **kwargs: Any,
@@ -275,10 +274,10 @@ def from_initial_conditions(
     ckpt: VALID_CKPT,
     initial_conditions: State | fluent.Action | fluent.Payload | Callable,
     lead_time: LEAD_TIME,
-    configuration_kwargs: Optional[dict[str, Any]] = None,
+    configuration_kwargs: dict[str, Any] | None = None,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
-    environment: Optional[list[str]] = None,
+    environment: list[str] | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -361,10 +360,10 @@ def create_dataset(
     config: dict[str, Any] | os.PathLike,
     path: os.PathLike,
     *,
-    number_of_tasks: Optional[int] = None,
+    number_of_tasks: int | None = None,
     overwrite: bool = False,
     test: bool = False,
-    environment: Optional[list[str]] = None,
+    environment: list[str] | None = None,
 ) -> fluent.Action:
     """
     Create an anemoi dataset from a configuration.
@@ -449,9 +448,7 @@ def create_dataset(
         """Get fluent payload"""
         return fluent.Payload(task, metadata=payload_metadata)
 
-    def apply_sequential_task(
-        prior: fluent.Action, task_name: str, opt: Optional[dict[str, Any]] = None
-    ) -> fluent.Action:
+    def apply_sequential_task(prior: fluent.Action, task_name: str, opt: dict[str, Any] | None = None) -> fluent.Action:
         """Apply a task on each node in the graph"""
         if opt is None:
             opt = options.copy()
@@ -497,8 +494,8 @@ def from_dataset(
     lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION = None,
-    input_template: Optional[dict[str, Any]] = None,
-    number_of_dataset_tasks: Optional[int] = None,
+    input_template: dict[str, Any] | None = None,
+    number_of_dataset_tasks: int | None = None,
     environment: ENVIRONMENT = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -630,7 +627,7 @@ class Action(fluent.Action):
         self,
         ckpt: VALID_CKPT,
         lead_time: LEAD_TIME,
-        configuration_kwargs: Optional[dict[str, Any]] = None,
+        configuration_kwargs: dict[str, Any] | None = None,
         environment: list[str] = None,
         **kwargs,
     ) -> fluent.Action:
