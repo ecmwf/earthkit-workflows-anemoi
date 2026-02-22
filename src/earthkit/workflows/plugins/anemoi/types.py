@@ -9,15 +9,13 @@
 
 import datetime
 import os
-from collections.abc import Sequence
-from typing import Any
-from typing import Optional
-from typing import Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Union
 
-VALID_CKPT = Union[os.PathLike, str, dict[str, Any]]
+VALID_CKPT = Union[os.PathLike[str], str, Mapping[str, Any]]
 LEAD_TIME = Union[int, str, datetime.timedelta]
 DATE = Union[datetime.datetime, tuple[int, int, int], str]
-ENVIRONMENT = Optional[Union[dict[str, list[str]], list[str]]]
+ENVIRONMENT = Union[Mapping[str, list[str]], list[str]]
 
-ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int], None]
+ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
 ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"

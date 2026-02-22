@@ -32,8 +32,6 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
-  "anemoi-datasets>=0.5.21",
-  "anemoi-inference>=0.7",
   "earthkit-workflows>=0.7",
   "qubed>=0.3",
 ]
@@ -45,6 +43,10 @@ optional-dependencies.docs = [
   "sphinx>8.2",
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
+]
+optional-dependencies.runtime = [
+  "anemoi-datasets>=0.5.21",
+  "anemoi-inference>=0.7",
 ]
 
 optional-dependencies.tests = [ "pytest", "pytest-mock", "pytest-xdist" ]
@@ -71,5 +73,3 @@ log_cli = true
 log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
 addopts = "-n8"
-
-[tool.uv.sources]
