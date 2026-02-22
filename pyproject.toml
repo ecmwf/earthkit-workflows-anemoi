@@ -73,4 +73,3 @@ testpaths = [ "tests/" ]
 addopts = "-n8"
 
 [tool.uv.sources]
-earthkit-workflows = { git = "https://github.com/ecmwf/earthkit-workflows", rev = "feat/expand-as-qubed" }
