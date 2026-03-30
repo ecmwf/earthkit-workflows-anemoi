@@ -28,7 +28,6 @@ from .utils import crack_environment, expansion_qube_from_metadata, faked_ensemb
 
 if TYPE_CHECKING:
     # anemoi-inference imports
-    from anemoi.inference.checkpoint import Checkpoint
     from anemoi.inference.config.run import RunConfiguration
     from anemoi.inference.metadata import Metadata
     from anemoi.inference.types import State
@@ -450,7 +449,7 @@ def create_dataset(
 
     Parameters
     ----------
-    config : dict[str, Any] | os.PathLike | sre
+    config : dict[str, Any] | os.PathLike | str
         Configuration to use
     path : os.PathLike | str
         Path to save the dataset to
@@ -645,6 +644,10 @@ def from_dataset(
         dataset_config = yaml.safe_load(open(dataset_config))
 
     # TODO: Get the metadata from the checkpoint without loading the whole checkpoint,
+    try:
+        from anemoi.inference.checkpoint import Checkpoint
+    except ImportError as e:
+        raise ImportError("Using `from_dataset` requires `anemoi-inference` to be installed.") from e
     checkpoint = Checkpoint(ckpt)  # type: ignore
 
     dates = list(map(lambda x: to_datetime(date) + x, checkpoint.lagged))
