@@ -18,17 +18,13 @@ import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from earthkit.data.utils.dates import to_datetime, to_timedelta
+from anemoi.utils.dates import as_timedelta
+from earthkit.data.utils.dates import to_datetime
 
 from earthkit.workflows import fluent
 
 from .types import ENSEMBLE_DIMENSION_NAME
-from .utils import crack_environment, expansion_qube, faked_ensemble_transform, parse_ensemble_members
-
-# from earthkit.workflows.plugins.anemoi.inference import _get_initial_conditions_source
-# from earthkit.workflows.plugins.anemoi.inference import run_model
-# from earthkit.workflows.plugins.anemoi.runner import CascadeRunner
-
+from .utils import crack_environment, expansion_qube_from_metadata, faked_ensemble_transform, parse_ensemble_members
 
 if TYPE_CHECKING:
     # anemoi-inference imports
@@ -40,6 +36,16 @@ if TYPE_CHECKING:
     from .types import DATE, ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME, VALID_CKPT
 
 LOG = logging.getLogger(__name__)
+
+
+def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | None = None) -> Metadata:
+    if metadata is not None:
+        return metadata
+
+    from anemoi.inference.checkpoint import Checkpoint
+
+    checkpoint = Checkpoint(ckpt)  # type: ignore
+    return checkpoint._metadata
 
 
 def _get_initial_conditions_source(
@@ -174,7 +180,7 @@ def _run_model(
     fluent.Action
         Cascade action of the model results
     """
-    lead_time = to_timedelta(lead_time)
+    lead_time = as_timedelta(lead_time)
 
     model_payload = fluent.Payload(
         "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config",
@@ -183,7 +189,7 @@ def _run_model(
         metadata=payload_metadata,
     )
 
-    qube = expansion_qube(metadata, lead_time)
+    qube = expansion_qube_from_metadata(metadata, lead_time)
     model_results = input_state_source.map(model_payload, yields=("step", list(qube.axes()["step"])))
     return model_results.expand_as_qube(qube.remove_by_key("step"))
 
@@ -266,7 +272,7 @@ def from_config(
     )
 
     return _run_model(
-        metadata,  # TODO Figure out how to get the metadata here
+        _get_metadata(configuration.checkpoint, metadata=None),  # type: ignore
         configuration,
         input_state_source,
         configuration.lead_time,
@@ -282,6 +288,7 @@ def from_input(
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
+    metadata: Metadata | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -308,6 +315,8 @@ def from_input(
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
+    metadata : Optional[Metadata], optional
+        `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -332,7 +341,7 @@ def from_input(
     )
 
     return _run_model(
-        metadata,  # TODO Figure out how to get the metadata here
+        _get_metadata(ckpt, metadata=metadata),
         config,
         input_state_source,
         lead_time,
@@ -344,10 +353,10 @@ def from_initial_conditions(
     ckpt: VALID_CKPT,
     initial_conditions: State | fluent.Action | fluent.Payload | Callable,
     lead_time: LEAD_TIME,
-    configuration_kwargs: dict[str, Any] | None = None,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
+    metadata: Metadata | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -365,8 +374,6 @@ def from_initial_conditions(
     lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
-    configuration_kwargs: dict[str, Any]:
-        kwargs for `anemoi.inference` configuration
     ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
         Number of ensemble members to run,
         If initial_conditions is a fluent action, with
@@ -378,6 +385,8 @@ def from_initial_conditions(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+    metadata : Optional[Metadata], optional
+        `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -392,7 +401,7 @@ def from_initial_conditions(
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
 
-    config = dict(checkpoint=ckpt, **(configuration_kwargs or {}))
+    config = dict(checkpoint=ckpt, **kwargs)
     environment_dict = crack_environment(environment, ["inference"])
 
     if isinstance(initial_conditions, fluent.Action):
@@ -419,7 +428,7 @@ def from_initial_conditions(
             (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
         )
     return _run_model(
-        metadata,  # TODO Figure out how to get the metadata here
+        _get_metadata(ckpt, metadata=metadata),
         config,
         ens_initial_conditions,
         lead_time,
@@ -577,6 +586,7 @@ def from_dataset(
     input_template: dict[str, Any] | None = None,
     number_of_dataset_tasks: int | None = None,
     environment: ENVIRONMENT | None = None,
+    metadata: Metadata | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -612,6 +622,8 @@ def from_dataset(
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference`, `initial_conditions`, and `dataset`
         to set the environment for each part of the run.
+    metadata : Optional[Metadata], optional
+        `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -629,17 +641,18 @@ def from_dataset(
 
     import yaml
 
-    if not isinstance(dataset_config, os.PathLike):
+    if not isinstance(dataset_config, dict):
         dataset_config = yaml.safe_load(open(dataset_config))
 
-    checkpoint = Checkpoint(ckpt)
+    # TODO: Get the metadata from the checkpoint without loading the whole checkpoint,
+    checkpoint = Checkpoint(ckpt)  # type: ignore
 
     dates = list(map(lambda x: to_datetime(date) + x, checkpoint.lagged))
     end_date = max(dates)
     start_date = min(dates)
     frequency = checkpoint.timestep
 
-    dataset_config["dates"] = {
+    dataset_config["dates"] = {  # type: ignore
         "start": start_date.strftime("%Y-%m-%dT%H:%M:%S"),
         "end": end_date.strftime("%Y-%m-%dT%H:%M:%S"),
         "frequency": str(frequency),
@@ -695,7 +708,7 @@ def from_dataset(
         payload_metadata={"environment": environment["initial_conditions"]},
     )
     return _run_model(
-        metadata,  # TODO Figure out how to get the metadata here
+        _get_metadata(ckpt, metadata=metadata),
         runner_config,
         input_state_source,
         lead_time,
@@ -710,7 +723,9 @@ class Action(fluent.Action):
         self,
         ckpt: VALID_CKPT,
         lead_time: LEAD_TIME,
-        configuration_kwargs: dict[str, Any] | None = None,
+        *,
+        ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
+        metadata: Metadata | None = None,
         environment: ENVIRONMENT | None = None,
         **kwargs,
     ) -> fluent.Action:
@@ -724,15 +739,17 @@ class Action(fluent.Action):
         lead_time : LEAD_TIME
             Lead time to run out to. Can be a string,
             i.e. `1H`, `1D`, int, or a datetime.timedelta
-        configuration_kwargs: dict[str, Any]:
-            kwargs for anemoi.inference configuration
+        ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
+            Number of ensemble members to run, If set to None, the number of ensemble members will be inferred from the action. by default None.
+        metadata : Metadata | None, optional
+            `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
         environment : Optional[list[str]], optional
             Environment to run the model in, by default None
             If None, will use the current environment
             Should be set to strings, as if used in pip install,
             e.g. `["anemoi-models==0.3.1"]`
         kwargs : dict
-            Additional arguments to pass to the runner
+            Additional arguments to pass to the configuration
 
 
         Returns
@@ -741,7 +758,13 @@ class Action(fluent.Action):
             Cascade action of the model results
         """
         return from_initial_conditions(
-            ckpt, self, lead_time, configuration_kwargs=configuration_kwargs, environment=environment, **kwargs
+            ckpt,
+            self,
+            lead_time,
+            ensemble_members=ensemble_members,
+            environment=environment,
+            metadata=metadata,
+            **kwargs,
         )
 
 

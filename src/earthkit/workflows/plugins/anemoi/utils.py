@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 E = TypeVar("E", bound=ENVIRONMENT)
 
 
-def expansion_qube(metadata: "Metadata", lead_time: "LEAD_TIME") -> Qube:
+def expansion_qube_from_metadata(metadata: "Metadata", lead_time: "LEAD_TIME") -> Qube:
     """Create a Qube object from model metadata and lead time.
 
     This function constructs a Qube object by analysing the model's metadata
@@ -88,6 +88,70 @@ def expansion_qube(metadata: "Metadata", lead_time: "LEAD_TIME") -> Qube:
     variables = metadata.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
     variables_metadata = metadata.typed_variables
     model_step = metadata.timestep.seconds
+    return _expansion_qube(variables, variables_metadata, model_step, lead_time)
+
+
+def expansion_qube_from_variables(
+    variables: list[str], variables_metadata: dict, model_step: int, lead_time: "LEAD_TIME"
+) -> Qube:
+    """Create a Qube object from a list of variable names, their metadata, model step, and lead time.
+
+    This function constructs a Qube object by analysing the provided list of variable names
+    and their corresponding metadata to identify surface, pressure level, and model level variables.
+    It creates a hierarchical qube structure organising variables by their vertical coordinate
+    type and expands them across time steps.
+
+    Parameters
+    ----------
+    variables : list[str]
+        A list of variable names to include in the qube. These should correspond to keys in the
+        variables_metadata dictionary.
+    variables_metadata : dict
+        A dictionary mapping variable names to their metadata objects. Each metadata object should
+        contain information about whether the variable is a surface level, pressure level, or model level variable,
+        as well as its parameter and level information.
+    model_step : int
+        The model's time step in seconds. This is used to calculate the time steps for expansion.
+    lead_time : LEAD_TIME
+        The forecast lead time as an integer or string (e.g., "7D" for 7 days). This determines the number of time steps in the expansion.
+        If an integer is provided, it is interpreted as hours.
+
+    Returns
+    -------
+    Qube
+        A qube object with a hierarchical structure containing up to three branches: surface, pressure, and model level variables. Each branch contains the appropriate parameters and coordinates.
+
+    Notes
+    -----
+    The function creates a qube with the following structure:
+
+    - Surface variables: expanded over (step, param)
+    - Pressure level variables: expanded over (step, param, level)
+    - Model level variables: expanded over (step, param, level)
+
+    Only variables that are present in the provided list and have corresponding metadata are included. The time steps are calculated from the model's time step size up to the specified lead time.
+
+    Examples
+    --------
+    Create expansion coordinates for specific variables:
+
+    >>> variables = ["2t", "msl", "10u"]
+    >>> variables_metadata = {
+            "2t": ...,
+            "msl": ...,
+            "10u": ...,
+        }
+    >>> model_step = 3600  # 1 hour in seconds
+    >>> lead_time = "5D"
+    >>> qube = expansion_qube_from_variables(variables, variables_metadata, model_step, lead_time)
+    >>> qube.axes()
+    {'step': {6, 12, 18, ..., 120}, 'param': {130, 134, 165}, 'level': {500, 1000}}
+
+    See Also
+    --------
+    Qube : The Qube class for manual qube construction
+    expansion_qube_from_metadata : Create a Qube object directly from model metadata.
+    """
     return _expansion_qube(variables, variables_metadata, model_step, lead_time)
 
 

@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 
 LOG = logging.getLogger(__name__)
 
-raise Exception()
-
 
 def _get_initial_conditions(input: Input, date: DATE) -> State:
     """Get initial conditions for the model"""
@@ -61,7 +59,7 @@ def _get_initial_conditions_ens(input: Input, ens_mem: int, date: DATE) -> State
 
 def _get_initial_conditions_from_config(config: RunConfiguration, date: DATE, ens_mem: int | None = None) -> State:
     """Get initial conditions for the model"""
-
+    # TODO: Instantiate the input directly
     runner = CascadeRunner(config)
     input = runner.create_input()
 

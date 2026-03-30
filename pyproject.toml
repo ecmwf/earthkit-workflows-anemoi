@@ -32,6 +32,7 @@ classifiers = [
 dynamic = [ "version" ]
 
 dependencies = [
+  "anemoi-utils",
   "earthkit-workflows>=0.7",
   "qubed>=0.3",
 ]
