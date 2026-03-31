@@ -14,25 +14,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 from anemoi.inference.testing import fake_checkpoints
-from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
-from xarray import DataArray
-from xarray import DataTree
+from xarray import DataArray, DataTree
 
-from earthkit.workflows.plugins.anemoi.fluent import Action
-from earthkit.workflows.plugins.anemoi.fluent import from_config
-from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
-from earthkit.workflows.plugins.anemoi.fluent import from_input
+from earthkit.workflows.plugins.anemoi.fluent import Action, from_config, from_initial_conditions, from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
-
-
-@pytest.fixture
-@fake_checkpoints
-def mock_config():
-    return MockRunConfiguration.load(
-        (Path(__file__).parent / "configs/simple.yaml").absolute(),
-        overrides=dict(runner="testing", device="cpu"),
-    )
-
 
 STANDARD_INFERENCE_TESTS = [
     # Test inputs of ensembles
@@ -131,6 +116,28 @@ def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape
     kwargs.pop("date", None)
 
     action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
+    shape.pop("date", None)
+    assert_shape(action, shape)
+
+
+@pytest.mark.parametrize(
+    "ckpt, ensemble_members, kwargs, shape",
+    STANDARD_INFERENCE_TESTS,
+)
+@fake_checkpoints
+def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members, kwargs, shape):
+    """Test running with no checkpoint file"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+
+    from anemoi.inference.checkpoint import Checkpoint
+
+    metadata = Checkpoint(ckpt_full_path)._metadata  # type: ignore
+
+    kwargs.pop("date", None)
+
+    action = from_initial_conditions(
+        "non_existent_checkpoint.ckpt", None, ensemble_members=ensemble_members, metadata=metadata, **kwargs
+    )
     shape.pop("date", None)
     assert_shape(action, shape)
 
