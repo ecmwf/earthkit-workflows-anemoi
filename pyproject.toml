@@ -50,7 +50,7 @@ optional-dependencies.runtime = [
   "anemoi-inference>=0.7",
 ]
 
-optional-dependencies.tests = [ "pytest", "pytest-mock", "pytest-xdist" ]
+optional-dependencies.tests = [ "earthkit-workflows-anemoi[runtime]", "pytest", "pytest-mock", "pytest-xdist" ]
 
 [tool.setuptools]
 include-package-data = true
