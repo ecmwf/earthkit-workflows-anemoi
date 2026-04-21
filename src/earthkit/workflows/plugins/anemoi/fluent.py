@@ -222,15 +222,29 @@ class Inference:
         """
         self.ckpt = ckpt
         self.lead_time = lead_time
-        self.environment = environment
-        self.metadata = _get_metadata(ckpt, metadata=metadata)
-        self.kwargs = kwargs
+        self.environment: ENVIRONMENT = environment if environment is not None else []
+        self.metadata: Metadata = _get_metadata(ckpt, metadata=metadata)
+        self.kwargs: dict[str, Any] = kwargs
 
     def _config(self, **kwargs: Any) -> dict[str, Any]:
         return {"checkpoint": self.ckpt, **self.kwargs, **kwargs}
 
-    def _environment(self, environment: ENVIRONMENT | None = None) -> ENVIRONMENT | None:
-        return environment if environment is not None else self.environment
+    def _run_model(
+        self,
+        config: RunConfiguration | dict,
+        input_state_source: fluent.Action,
+        *,
+        payload_metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> fluent.Action:
+        return _run_model(
+            self.metadata,
+            config,
+            input_state_source,
+            self.lead_time,
+            payload_metadata=payload_metadata,
+            **kwargs,
+        )
 
     def from_input(
         self,
@@ -238,7 +252,6 @@ class Inference:
         date: DATE,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
-        environment: ENVIRONMENT | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -253,8 +266,6 @@ class Inference:
             Date to get initial conditions for
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
             Number of ensemble members to run, None will run a single instance, by default None
-        environment : ENVIRONMENT, optional
-            Environment to use for this action. If not provided, uses the class environment.
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -271,7 +282,7 @@ class Inference:
         """
         config = self._config(input=input, **kwargs)
         environment_dict = crack_environment(
-            self._environment(environment),
+            self.environment,
             ["inference", "initial_conditions"],
         )
 
@@ -282,20 +293,17 @@ class Inference:
             payload_metadata={"environment": environment_dict["initial_conditions"]},
         )
 
-        return _run_model(
-            self.metadata,
+        return self._run_model(
             config,
             input_state_source,
-            self.lead_time,
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
     def from_initial_conditions(
         self,
-        initial_conditions: State | fluent.Action | fluent.Payload | Callable,
+        initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
-        environment: ENVIRONMENT | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -303,9 +311,10 @@ class Inference:
 
         Parameters
         ----------
-        initial_conditions : State | fluent.Action | fluent.Payload | Callable
+        initial_conditions : State | None | fluent.Action | fluent.Payload | Callable
             Initial conditions for the model
-            Can be other fluent actions, payloads, or a callable, or a State.
+            Can be other fluent actions, payloads, a callable, a State, or None.
+            None creates a source node that yields None.
             If a fluent action and multiple ensemble member initial conditions
             are included, the dimension must be named `ensemble_member`.
         ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
@@ -313,8 +322,6 @@ class Inference:
             If initial_conditions is a fluent action with multiple ensemble
             members, this argument can be set to None, and the number of
             ensemble members will be inferred from the action.
-        environment : ENVIRONMENT, optional
-            Environment to use for this action. If not provided, uses the class environment.
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -330,7 +337,7 @@ class Inference:
         >>> inference.from_initial_conditions(init_conditions)
         """
         config = self._config(**kwargs)
-        environment_dict = crack_environment(self._environment(environment), ["inference"])
+        environment_dict = crack_environment(self.environment, ["inference"])
 
         if isinstance(initial_conditions, fluent.Action):
             initial_conditions_source = initial_conditions
@@ -362,11 +369,9 @@ class Inference:
                 (ENSEMBLE_DIMENSION_NAME, parsed_ensemble_members),  # type: ignore
             )
 
-        return _run_model(
-            self.metadata,
+        return self._run_model(
             config,
             ens_initial_conditions,
-            self.lead_time,
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
@@ -516,7 +521,7 @@ def from_input(
 
 def from_initial_conditions(
     ckpt: VALID_CKPT,
-    initial_conditions: State | fluent.Action | fluent.Payload | Callable,
+    initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
     lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
@@ -531,9 +536,10 @@ def from_initial_conditions(
     ----------
     ckpt : VALID_CKPT
         Checkpoint to load
-    initial_conditions : State | fluent.Action | fluent.Payload | Callable
+    initial_conditions : State | None | fluent.Action | fluent.Payload | Callable
         Initial conditions for the model
-        Can be other fluent actions, payloads, or a callable, or a State.
+        Can be other fluent actions, payloads, a callable, a State, or None.
+        None creates a source node that yields None.
         If a fluent action and multiple ensemble member initial conditions
         are included, the dimension must be named `ensemble_member`.
     lead_time : LEAD_TIME

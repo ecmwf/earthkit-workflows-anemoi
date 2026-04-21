@@ -23,8 +23,8 @@ the following code:
    model_action = inference.from_input("mars", "2022-01-01T00:00")
    model_action
 
-This will use load the checkpoint, and use the ``mars`` input source,
-with a lead_time of 7 days. It is possible to configure the input source
+This will load the checkpoint and use the ``mars`` input source,
+with a lead time of 7 days. It is possible to configure the input source
 just like you would do with the ``anemoi-inference`` interfaces.
 
 *************

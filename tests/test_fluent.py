@@ -124,6 +124,8 @@ def test_from_config(mock_config, ckpt, ensemble_members, kwargs, shape):
 def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
@@ -157,6 +159,8 @@ def test_inference_from_initial_conditions_from_none(ckpt, ensemble_members, kwa
 def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members, kwargs, shape):
     """Test running with no checkpoint file"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
 
     from anemoi.inference.checkpoint import Checkpoint
 
@@ -179,6 +183,8 @@ def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members,
 def test_from_initial_conditions_from_action(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     from earthkit.workflows import fluent
@@ -202,6 +208,8 @@ def test_from_initial_conditions_from_action(ckpt, ensemble_members, kwargs, sha
 def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     from earthkit.workflows import fluent
