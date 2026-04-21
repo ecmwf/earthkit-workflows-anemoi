@@ -19,9 +19,8 @@ the following code:
 
    CKPT = {"huggingface": "ecmwf/aifs-single-1.0"}
 
-   model_action = anemoi_workflows.fluent.from_input(
-       CKPT, "mars", "2022-01-01T00:00", lead_time="7D"
-   )
+   inference = anemoi_workflows.fluent.Inference(CKPT, lead_time="7D")
+   model_action = inference.from_input("mars", "2022-01-01T00:00")
    model_action
 
 This will use load the checkpoint, and use the ``mars`` input source,
@@ -33,7 +32,7 @@ just like you would do with the ``anemoi-inference`` interfaces.
 *************
 
 If more complex initial conditions are required, you can use the
-``infer`` method on an existing source node.
+``from_initial_conditions`` method on an ``Inference`` instance.
 
 .. code:: python
 
@@ -43,7 +42,8 @@ If more complex initial conditions are required, you can use the
    SOURCE_NODES: fluent.Action
    CKPT = {"huggingface": "ecmwf/aifs-single-1.0"}
 
-   SOURCE_NODES.anemoi.infer(CKPT, lead_time="7D")
+   inference = anemoi_workflows.fluent.Inference(CKPT, lead_time="7D")
+   inference.from_initial_conditions(SOURCE_NODES)
 
 This will use the existing source nodes as the initial conditions, and
 run the inference task with the specified checkpoint, lead time. If the

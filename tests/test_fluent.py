@@ -16,7 +16,7 @@ import pytest
 from anemoi.inference.testing import fake_checkpoints
 from xarray import DataArray, DataTree
 
-from earthkit.workflows.plugins.anemoi.fluent import Action, from_config, from_initial_conditions, from_input
+from earthkit.workflows.plugins.anemoi.fluent import Action, Inference, from_config, from_initial_conditions, from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 STANDARD_INFERENCE_TESTS = [
@@ -90,6 +90,17 @@ def test_from_input(ckpt, ensemble_members, kwargs, shape):
     assert_shape(action, shape)
 
 
+@pytest.mark.parametrize("ckpt, ensemble_members, kwargs, shape", STANDARD_INFERENCE_TESTS)
+@fake_checkpoints
+def test_inference_from_input(ckpt, ensemble_members, kwargs, shape):
+    """Test running from input using the class API"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+
+    inference = Inference(ckpt_full_path, lead_time=kwargs["lead_time"])
+    action = inference.from_input("dummy", kwargs["date"], ensemble_members=ensemble_members)
+    assert_shape(action, shape)
+
+
 @pytest.mark.parametrize(
     "ckpt, ensemble_members, kwargs, shape",
     STANDARD_INFERENCE_TESTS,
@@ -116,6 +127,24 @@ def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape
     kwargs.pop("date", None)
 
     action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
+    shape.pop("date", None)
+    assert_shape(action, shape)
+
+
+@pytest.mark.parametrize(
+    "ckpt, ensemble_members, kwargs, shape",
+    STANDARD_INFERENCE_TESTS,
+)
+@fake_checkpoints
+def test_inference_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape):
+    """Test running from initial conditions using the class API"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
+    kwargs.pop("date", None)
+
+    inference = Inference(ckpt_full_path, lead_time=kwargs.pop("lead_time"))
+    action = inference.from_initial_conditions(None, ensemble_members=ensemble_members, **kwargs)
     shape.pop("date", None)
     assert_shape(action, shape)
 
