@@ -9,9 +9,8 @@
 
 """
 Custom Cascade Runner
-
-Used for when providing initial conditions
 """
+# TODO: Replace with new inference runners and remove
 
 from __future__ import annotations
 
