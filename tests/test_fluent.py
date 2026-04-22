@@ -14,25 +14,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 from anemoi.inference.testing import fake_checkpoints
-from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
-from xarray import DataArray
-from xarray import DataTree
+from earthkit.workflows.fluent import nodetree_arrays
+from xarray import DataArray, DataTree
 
-from earthkit.workflows.plugins.anemoi.fluent import Action
-from earthkit.workflows.plugins.anemoi.fluent import from_config
-from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
-from earthkit.workflows.plugins.anemoi.fluent import from_input
+from earthkit.workflows.plugins.anemoi.fluent import Action, Inference, from_config, from_initial_conditions, from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
-
-
-@pytest.fixture
-@fake_checkpoints
-def mock_config():
-    return MockRunConfiguration.load(
-        (Path(__file__).parent / "configs/simple.yaml").absolute(),
-        overrides=dict(runner="testing", device="cpu"),
-    )
-
 
 STANDARD_INFERENCE_TESTS = [
     # Test inputs of ensembles
@@ -105,6 +91,17 @@ def test_from_input(ckpt, ensemble_members, kwargs, shape):
     assert_shape(action, shape)
 
 
+@pytest.mark.parametrize("ckpt, ensemble_members, kwargs, shape", STANDARD_INFERENCE_TESTS)
+@fake_checkpoints
+def test_inference_from_input(ckpt, ensemble_members, kwargs, shape):
+    """Test running from input using the class API"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+
+    inference = Inference(ckpt_full_path, lead_time=kwargs["lead_time"])
+    action = inference.from_input("dummy", kwargs["date"], ensemble_members=ensemble_members)
+    assert_shape(action, shape)
+
+
 @pytest.mark.parametrize(
     "ckpt, ensemble_members, kwargs, shape",
     STANDARD_INFERENCE_TESTS,
@@ -128,6 +125,8 @@ def test_from_config(mock_config, ckpt, ensemble_members, kwargs, shape):
 def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
@@ -140,9 +139,53 @@ def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape
     STANDARD_INFERENCE_TESTS,
 )
 @fake_checkpoints
+def test_inference_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape):
+    """Test running from initial conditions using the class API"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
+    kwargs.pop("date", None)
+
+    inference = Inference(ckpt_full_path, lead_time=kwargs.pop("lead_time"))
+    action = inference.from_initial_conditions(None, ensemble_members=ensemble_members, **kwargs)
+    shape.pop("date", None)
+    assert_shape(action, shape)
+
+
+@pytest.mark.parametrize(
+    "ckpt, ensemble_members, kwargs, shape",
+    STANDARD_INFERENCE_TESTS,
+)
+@fake_checkpoints
+def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members, kwargs, shape):
+    """Test running with no checkpoint file"""
+    ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
+
+    from anemoi.inference.checkpoint import Checkpoint
+
+    metadata = Checkpoint(ckpt_full_path)._metadata  # type: ignore
+
+    kwargs.pop("date", None)
+
+    action = from_initial_conditions(
+        "non_existent_checkpoint.ckpt", None, ensemble_members=ensemble_members, metadata=metadata, **kwargs
+    )
+    shape.pop("date", None)
+    assert_shape(action, shape)
+
+
+@pytest.mark.parametrize(
+    "ckpt, ensemble_members, kwargs, shape",
+    STANDARD_INFERENCE_TESTS,
+)
+@fake_checkpoints
 def test_from_initial_conditions_from_action(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     from earthkit.workflows import fluent
@@ -166,6 +209,8 @@ def test_from_initial_conditions_from_action(ckpt, ensemble_members, kwargs, sha
 def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shape):
     """Test running from initial conditions"""
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
+    kwargs = kwargs.copy()
+    shape = shape.copy()
     kwargs.pop("date", None)
 
     from earthkit.workflows import fluent
@@ -181,3 +226,70 @@ def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shap
 
     action = init_conditions.infer(ckpt_full_path, **kwargs)
     assert_shape(action, shape)
+
+
+# --- payload_metadata propagation ---
+
+PAYLOAD_METADATA = {"source": "test", "run_id": "abc123"}
+SIMPLE_CKPT = "simple"
+SIMPLE_KWARGS = {"date": "2020-01-01", "lead_time": "1D"}
+
+
+def assert_payload_metadata(action: Action, expected: dict) -> None:
+    """Assert every node in action carries the expected metadata entries."""
+    for _, narray in nodetree_arrays(action.nodes):
+        for node in np.atleast_1d(narray.values).flatten():
+            for key, value in expected.items():
+                assert node.payload.metadata.get(key) == value, (
+                    f"Node {node.name!r} missing metadata {key!r}={value!r}, " f"got {node.payload.metadata}"
+                )
+
+
+@fake_checkpoints
+def test_from_input_propagates_payload_metadata():
+    """payload_metadata passed to from_input is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    action = from_input(ckpt, "dummy", payload_metadata=PAYLOAD_METADATA, **SIMPLE_KWARGS)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_from_initial_conditions_propagates_payload_metadata():
+    """payload_metadata passed to from_initial_conditions is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    kwargs = SIMPLE_KWARGS.copy()
+    kwargs.pop("date")
+    action = from_initial_conditions(ckpt, None, payload_metadata=PAYLOAD_METADATA, **kwargs)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_from_config_propagates_payload_metadata(mock_config):
+    """payload_metadata passed to from_config is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    action = from_config(
+        mock_config,
+        payload_metadata=PAYLOAD_METADATA,
+        checkpoint=str(ckpt),
+        input="dummy",
+        **SIMPLE_KWARGS,
+    )
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_inference_from_input_propagates_payload_metadata():
+    """payload_metadata passed to Inference.from_input is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
+    action = inference.from_input("dummy", SIMPLE_KWARGS["date"], payload_metadata=PAYLOAD_METADATA)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_propagates_payload_metadata():
+    """payload_metadata passed to Inference.from_initial_conditions is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(None, payload_metadata=PAYLOAD_METADATA)
+    assert_payload_metadata(action, PAYLOAD_METADATA)

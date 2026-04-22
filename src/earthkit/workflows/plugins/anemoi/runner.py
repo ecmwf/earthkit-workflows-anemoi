@@ -19,12 +19,11 @@ import logging
 import os
 
 from anemoi.inference.config.run import RunConfiguration
-from anemoi.inference.forcings import ComputedForcings
-from anemoi.inference.forcings import CoupledForcings
-from anemoi.inference.forcings import Forcings
+from anemoi.inference.forcings import ComputedForcings, CoupledForcings, Forcings
 from anemoi.inference.inputs import create_input
 from anemoi.inference.inputs.ekd import EkdInput
 from anemoi.inference.post_processors import create_post_processor
+from anemoi.inference.pre_processors import create_pre_processor
 from anemoi.inference.processor import Processor
 from anemoi.inference.runner import Runner
 from anemoi.inference.types import IntArray
@@ -64,25 +63,8 @@ class CascadeRunner(Runner):
             The created input.
         """
         input = create_input(
-            self, self.config.input, variables=self.checkpoint.select_variables(include=["prognostic", "forcing"])
+            self, self.config.input, variables=self.checkpoint.select_variables(include=["prognostic", "forcing"])  # type: ignore # Error in anemoi.inference
         )
-
-        def set_variables(input: EkdInput) -> EkdInput:
-            """Set the variables for the input."""
-            if not isinstance(input, EkdInput):
-                LOG.warning("Input is not an instance of EkdInput, setting the expected variables may not work.")
-            return input
-
-        from anemoi.inference.inputs.cutout import Cutout
-
-        if isinstance(input, Cutout):  # type: ignore
-            input.sources = {src: set_variables(src_input) for src, src_input in input.sources.items()}
-        elif isinstance(input, EkdInput):
-            input = set_variables(input)
-        # If input is not an instance of EkdInput, we cannot set the variables
-        # but we can still use the input as it is.
-        # This is a fallback for when the input is not an instance of EkdInput.
-        LOG.debug("Input: %s", input)
         return input
 
     def create_constant_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
@@ -142,9 +124,8 @@ class CascadeRunner(Runner):
         # there are supposed to be already in the state dictionary
         # or managed by the user.
         input = create_input(
-            self, self.config.input, variables=self.checkpoint.select_variables(include=["constant", "forcing"])
+            self, self.config.input, variables=self.checkpoint.select_variables(include=["constant", "forcing"])  # type: ignore # Error in anemoi.inference
         )
-        # return []
         result = CoupledForcings(self, input, variables, mask)
         LOG.debug("Constant coupled forcing: %s", result)
         return [result]
@@ -170,6 +151,19 @@ class CascadeRunner(Runner):
         LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
         return []
 
+    def create_pre_processors(self) -> list[Processor]:
+        """Create pre-processors.
+
+        Returns
+        -------
+        List[Processor]
+            The created pre-processors.
+        """
+        result = []
+        for processor in self.config.pre_processors:
+            result.append(create_pre_processor(self, processor))
+        return result
+
     def create_post_processors(self) -> list[Processor]:
         """Create post-processors.
 
@@ -181,6 +175,4 @@ class CascadeRunner(Runner):
         result = []
         for processor in self.config.post_processors:
             result.append(create_post_processor(self, processor))
-
-        LOG.debug("Post processors: %s", result)
         return result

@@ -25,13 +25,37 @@ Earthkit-Workflows-Anemoi is a Python library for connecting [anemoi-inference](
 
 ## Installation
 
-Install via `pip` with:
+The package has a split dependency structure to allow flexible installation:
+
+### For workflow creation (minimal)
+
+To create workflows without running them locally:
 
 ```bash
-pip install 'earthkit-workflows-anemoi[all]'
+pip install earthkit-workflows-anemoi
 ```
 
-For development, you can use `pip install -e .` Additionally you may want to install pre-commit hooks via
+This installs only the core dependencies needed to define and serialize workflows.
+
+### For workflow execution (full runtime)
+
+To both create and execute workflows locally:
+
+```bash
+pip install 'earthkit-workflows-anemoi[runtime]'
+```
+
+This includes `anemoi-inference` and `anemoi-datasets` required for local execution.
+
+### For development
+
+```bash
+git clone https://github.com/ecmwf/earthkit-workflows-anemoi.git
+cd earthkit-workflows-anemoi
+pip install -e '.[dev]'
+```
+
+Additionally you may want to install pre-commit hooks:
 
 ```bash
 pip install pre-commit
