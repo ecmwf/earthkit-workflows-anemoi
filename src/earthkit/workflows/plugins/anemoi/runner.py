@@ -118,12 +118,8 @@ class CascadeRunner(Runner):
         List
             The created constant coupled forcings.
         """
-        # This runner does not support coupled forcings
-        # there are supposed to be already in the state dictionary
-        # or managed by the user.
-        input = create_input(
-            self, self.config.input, variables=self.checkpoint.select_variables(include=["constant", "forcing"])  # type: ignore # Error in anemoi.inference
-        )
+        variables = self.variables.retrieved_constant_forcings_variables()
+        input = create_input(self, self.config.input, variables=variables)  # type: ignore # Error in anemoi.inference
         result = CoupledForcings(self, input, variables, mask)
         LOG.debug("Constant coupled forcing: %s", result)
         return [result]
