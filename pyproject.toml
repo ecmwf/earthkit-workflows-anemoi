@@ -50,7 +50,13 @@ optional-dependencies.runtime = [
   "anemoi-inference>=0.7",
 ]
 
-optional-dependencies.tests = [ "earthkit-workflows-anemoi[runtime]", "pytest", "pytest-mock", "pytest-xdist" ]
+[dependency-groups]
+dev = [
+  "earthkit-workflows-anemoi[runtime]",
+  "pytest>=9.0.3",
+  "pytest-mock>=3.15.1",
+  "pytest-xdist>=3.8",
+]
 
 [tool.setuptools]
 include-package-data = true
@@ -74,3 +80,6 @@ log_cli = true
 log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
 addopts = "-n8"
+
+[tool.uv.sources]
+earthkit-workflows-anemoi = { workspace = true }
