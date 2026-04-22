@@ -118,6 +118,11 @@ todo_include_todos = not read_the_docs_build
 
 autodoc_member_order = "bysource"  # Keep file order
 
+# Mock imports for optional dependencies (runtime group)
+autodoc_mock_imports = [
+    "anemoi.inference",
+    "anemoi.datasets",
+]
 
 # https://autodoc-pydantic.readthedocs.io/en/stable/users/configuration.html
 
