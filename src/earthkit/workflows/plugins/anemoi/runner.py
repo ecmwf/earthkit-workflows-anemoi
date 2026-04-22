@@ -62,9 +62,8 @@ class CascadeRunner(Runner):
         Input
             The created input.
         """
-        input = create_input(
-            self, self.config.input, variables=self.checkpoint.select_variables(include=["prognostic", "forcing"])  # type: ignore # Error in anemoi.inference
-        )
+        variables = self.variables.retrieved_prognostic_variables()
+        input = create_input(self, self.config.input, variables=variables)  # type: ignore # Error in anemoi.inference
         return input
 
     def create_constant_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
