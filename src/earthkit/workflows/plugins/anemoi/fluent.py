@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from anemoi.utils.dates import as_timedelta
 from earthkit.data.utils.dates import to_datetime
+from earthkit.workflows.fluent import capture_payload_metadata
 
 from earthkit.workflows import fluent
 
@@ -246,6 +247,7 @@ class Inference:
             **kwargs,
         )
 
+    @capture_payload_metadata
     def from_input(
         self,
         input: str | dict[str, Any],
@@ -299,6 +301,7 @@ class Inference:
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
+    @capture_payload_metadata
     def from_initial_conditions(
         self,
         initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
@@ -376,6 +379,7 @@ class Inference:
         )
 
 
+@capture_payload_metadata
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
     overrides: dict[str, Any] | None = None,
@@ -462,6 +466,7 @@ def from_config(
     )
 
 
+@capture_payload_metadata
 def from_input(
     ckpt: VALID_CKPT,
     input: str | dict[str, Any],
@@ -519,6 +524,7 @@ def from_input(
     )
 
 
+@capture_payload_metadata
 def from_initial_conditions(
     ckpt: VALID_CKPT,
     initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
@@ -717,6 +723,7 @@ def create_dataset(
     return verify.map(get_path)
 
 
+@capture_payload_metadata
 def from_dataset(
     ckpt: VALID_CKPT,
     dataset_config: dict[str, Any] | os.PathLike,

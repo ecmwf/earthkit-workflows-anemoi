@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from anemoi.inference.testing import fake_checkpoints
+from earthkit.workflows.fluent import nodetree_arrays
 from xarray import DataArray, DataTree
 
 from earthkit.workflows.plugins.anemoi.fluent import Action, Inference, from_config, from_initial_conditions, from_input
@@ -225,3 +226,70 @@ def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shap
 
     action = init_conditions.infer(ckpt_full_path, **kwargs)
     assert_shape(action, shape)
+
+
+# --- payload_metadata propagation ---
+
+PAYLOAD_METADATA = {"source": "test", "run_id": "abc123"}
+SIMPLE_CKPT = "simple"
+SIMPLE_KWARGS = {"date": "2020-01-01", "lead_time": "1D"}
+
+
+def assert_payload_metadata(action: Action, expected: dict) -> None:
+    """Assert every node in action carries the expected metadata entries."""
+    for _, narray in nodetree_arrays(action.nodes):
+        for node in np.atleast_1d(narray.values).flatten():
+            for key, value in expected.items():
+                assert node.payload.metadata.get(key) == value, (
+                    f"Node {node.name!r} missing metadata {key!r}={value!r}, " f"got {node.payload.metadata}"
+                )
+
+
+@fake_checkpoints
+def test_from_input_propagates_payload_metadata():
+    """payload_metadata passed to from_input is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    action = from_input(ckpt, "dummy", payload_metadata=PAYLOAD_METADATA, **SIMPLE_KWARGS)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_from_initial_conditions_propagates_payload_metadata():
+    """payload_metadata passed to from_initial_conditions is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    kwargs = SIMPLE_KWARGS.copy()
+    kwargs.pop("date")
+    action = from_initial_conditions(ckpt, None, payload_metadata=PAYLOAD_METADATA, **kwargs)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_from_config_propagates_payload_metadata(mock_config):
+    """payload_metadata passed to from_config is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    action = from_config(
+        mock_config,
+        payload_metadata=PAYLOAD_METADATA,
+        checkpoint=str(ckpt),
+        input="dummy",
+        **SIMPLE_KWARGS,
+    )
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_inference_from_input_propagates_payload_metadata():
+    """payload_metadata passed to Inference.from_input is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
+    action = inference.from_input("dummy", SIMPLE_KWARGS["date"], payload_metadata=PAYLOAD_METADATA)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_propagates_payload_metadata():
+    """payload_metadata passed to Inference.from_initial_conditions is stored on every result node."""
+    ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+    inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(None, payload_metadata=PAYLOAD_METADATA)
+    assert_payload_metadata(action, PAYLOAD_METADATA)
