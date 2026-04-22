@@ -193,6 +193,189 @@ def _run_model(
     return model_results.expand_as_qube(qube.remove_by_key("step"))
 
 
+class Inference:
+    """Build fluent workflow actions for one anemoi inference setup."""
+
+    def __init__(
+        self,
+        ckpt: VALID_CKPT,
+        lead_time: LEAD_TIME,
+        *,
+        environment: ENVIRONMENT | None = None,
+        metadata: Metadata | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        ckpt : VALID_CKPT
+            Checkpoint to load
+        lead_time : LEAD_TIME
+            Lead time to run out to. Can be a string,
+            i.e. `1H`, `1D`, int, or a datetime.timedelta
+        environment : ENVIRONMENT, optional
+            Environment to run the model in, by default None
+        metadata : Optional[Metadata], optional
+            `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+        kwargs : dict
+            Additional arguments to pass to the runner configuration
+        """
+        self.ckpt = ckpt
+        self.lead_time = lead_time
+        self.environment: ENVIRONMENT = environment if environment is not None else []
+        self.metadata: Metadata = _get_metadata(ckpt, metadata=metadata)
+        self.kwargs: dict[str, Any] = kwargs
+
+    def _config(self, **kwargs: Any) -> dict[str, Any]:
+        return {"checkpoint": self.ckpt, **self.kwargs, **kwargs}
+
+    def _run_model(
+        self,
+        config: RunConfiguration | dict,
+        input_state_source: fluent.Action,
+        *,
+        payload_metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> fluent.Action:
+        return _run_model(
+            self.metadata,
+            config,
+            input_state_source,
+            self.lead_time,
+            payload_metadata=payload_metadata,
+            **kwargs,
+        )
+
+    def from_input(
+        self,
+        input: str | dict[str, Any],
+        date: DATE,
+        *,
+        ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
+        **kwargs: Any,
+    ) -> fluent.Action:
+        """
+        Run an anemoi inference model from a given input source.
+
+        Parameters
+        ----------
+        input : str | dict[str, Any]
+            `anemoi.inference` input source.
+            Can be `mars`, `grib`, etc or a dictionary of input configuration,
+        date : DATE
+            Date to get initial conditions for
+        ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
+            Number of ensemble members to run, None will run a single instance, by default None
+        kwargs : dict
+            Additional arguments to pass to the runner configuration
+
+        Returns
+        -------
+        fluent.Action
+            earthkit.workflows action of the model results
+
+        Examples
+        -------
+        >>> from earthkit.workflows.plugins.anemoi.fluent import Inference
+        >>> inference = Inference("anemoi_model.ckpt", lead_time = "10D")
+        >>> inference.from_input("mars", date = "2021-01-01T00:00:00")
+        """
+        config = self._config(input=input, **kwargs)
+        environment_dict = crack_environment(
+            self.environment,
+            ["inference", "initial_conditions"],
+        )
+
+        input_state_source = _get_initial_conditions_source(
+            config=config,
+            date=date,
+            ensemble_members=ensemble_members,
+            payload_metadata={"environment": environment_dict["initial_conditions"]},
+        )
+
+        return self._run_model(
+            config,
+            input_state_source,
+            payload_metadata={"environment": environment_dict["inference"]},
+        )
+
+    def from_initial_conditions(
+        self,
+        initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
+        *,
+        ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
+        **kwargs: Any,
+    ) -> fluent.Action:
+        """
+        Run an anemoi inference model from initial conditions.
+
+        Parameters
+        ----------
+        initial_conditions : State | None | fluent.Action | fluent.Payload | Callable
+            Initial conditions for the model
+            Can be other fluent actions, payloads, a callable, a State, or None.
+            None creates a source node that yields None.
+            If a fluent action and multiple ensemble member initial conditions
+            are included, the dimension must be named `ensemble_member`.
+        ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
+            Number of ensemble members to run.
+            If initial_conditions is a fluent action with multiple ensemble
+            members, this argument can be set to None, and the number of
+            ensemble members will be inferred from the action.
+        kwargs : dict
+            Additional arguments to pass to the runner configuration
+
+        Returns
+        -------
+        fluent.Action
+            earthkit.workflows action of the model results
+
+        Examples
+        --------
+        >>> from earthkit.workflows.plugins.anemoi.fluent import Inference
+        >>> inference = Inference("anemoi_model.ckpt", lead_time = "10D")
+        >>> inference.from_initial_conditions(init_conditions)
+        """
+        config = self._config(**kwargs)
+        environment_dict = crack_environment(self.environment, ["inference"])
+
+        if isinstance(initial_conditions, fluent.Action):
+            initial_conditions_source = initial_conditions
+        elif isinstance(initial_conditions, (Callable, fluent.Payload)):
+            initial_conditions_source = fluent.from_source([initial_conditions])  # type: ignore
+        else:
+            initial_conditions_source = fluent.from_source(
+                [fluent.Payload(lambda: initial_conditions)],
+                dims=["date"],
+            )  # type: ignore
+
+        if ENSEMBLE_DIMENSION_NAME in initial_conditions_source.nodes.dims:
+            if ensemble_members is None:
+                ensemble_members = len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME])
+
+            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
+
+            if len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME]) != len(parsed_ensemble_members):
+                raise ValueError(
+                    "Number of ensemble members in initial conditions must match `ensemble_members` argument"
+                )
+            ens_initial_conditions = initial_conditions_source
+
+        else:
+            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
+            ens_initial_conditions = initial_conditions_source.transform(
+                faked_ensemble_transform,
+                list(zip(parsed_ensemble_members)),  # type: ignore
+                (ENSEMBLE_DIMENSION_NAME, parsed_ensemble_members),  # type: ignore
+            )
+
+        return self._run_model(
+            config,
+            ens_initial_conditions,
+            payload_metadata={"environment": environment_dict["inference"]},
+        )
+
+
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
     overrides: dict[str, Any] | None = None,
@@ -329,28 +512,16 @@ def from_input(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
-    config = dict(checkpoint=ckpt, input=input, **kwargs)
-    environment = crack_environment(environment, ["inference", "initial_conditions"])
-
-    input_state_source = _get_initial_conditions_source(
-        config=config,
-        date=date,
+    return Inference(ckpt, lead_time, environment=environment, metadata=metadata, **kwargs).from_input(
+        input,
+        date,
         ensemble_members=ensemble_members,
-        payload_metadata={"environment": environment["initial_conditions"]},
-    )
-
-    return _run_model(
-        _get_metadata(ckpt, metadata=metadata),
-        config,
-        input_state_source,
-        lead_time,
-        payload_metadata={"environment": environment["inference"]},
     )
 
 
 def from_initial_conditions(
     ckpt: VALID_CKPT,
-    initial_conditions: State | fluent.Action | fluent.Payload | Callable,
+    initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
     lead_time: LEAD_TIME,
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
@@ -365,9 +536,10 @@ def from_initial_conditions(
     ----------
     ckpt : VALID_CKPT
         Checkpoint to load
-    initial_conditions : State | fluent.Action | fluent.Payload | Callable
+    initial_conditions : State | None | fluent.Action | fluent.Payload | Callable
         Initial conditions for the model
-        Can be other fluent actions, payloads, or a callable, or a State.
+        Can be other fluent actions, payloads, a callable, a State, or None.
+        None creates a source node that yields None.
         If a fluent action and multiple ensemble member initial conditions
         are included, the dimension must be named `ensemble_member`.
     lead_time : LEAD_TIME
@@ -399,39 +571,9 @@ def from_initial_conditions(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-
-    config = dict(checkpoint=ckpt, **kwargs)
-    environment_dict = crack_environment(environment, ["inference"])
-
-    if isinstance(initial_conditions, fluent.Action):
-        initial_conditions = initial_conditions
-    elif isinstance(initial_conditions, (Callable, fluent.Payload)):
-        initial_conditions = fluent.from_source([initial_conditions])  # type: ignore
-    else:
-        initial_conditions = fluent.from_source([fluent.Payload(lambda: initial_conditions)], dims=["date"])  # type: ignore
-
-    if ENSEMBLE_DIMENSION_NAME in initial_conditions.nodes.dims:
-        if ensemble_members is None:
-            ensemble_members = len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME])
-
-        parsed_ensemble_members = parse_ensemble_members(ensemble_members)
-
-        if not len(initial_conditions.nodes.coords[ENSEMBLE_DIMENSION_NAME]) == len(parsed_ensemble_members):
-            raise ValueError("Number of ensemble members in initial conditions must match `ensemble_members` argument")
-        ens_initial_conditions = initial_conditions
-
-    else:
-        ens_initial_conditions = initial_conditions.transform(
-            faked_ensemble_transform,
-            list(zip(parse_ensemble_members(ensemble_members))),  # type: ignore
-            (ENSEMBLE_DIMENSION_NAME, parse_ensemble_members(ensemble_members)),  # type: ignore
-        )
-    return _run_model(
-        _get_metadata(ckpt, metadata=metadata),
-        config,
-        ens_initial_conditions,
-        lead_time,
-        payload_metadata={"environment": environment_dict["inference"]},
+    return Inference(ckpt, lead_time, environment=environment, metadata=metadata, **kwargs).from_initial_conditions(
+        initial_conditions,
+        ensemble_members=ensemble_members,
     )
 
 
@@ -775,6 +917,7 @@ fluent.Action.register("anemoi", Action)
 
 
 __all__ = [
+    "Inference",
     "from_config",
     "from_input",
     "from_initial_conditions",
