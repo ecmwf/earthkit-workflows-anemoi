@@ -230,7 +230,7 @@ def parse_ensemble_members(ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | No
     return list(ensemble_members)
 
 
-def _empty_payload(x, ens_mem: int | None):
+def _empty_payload(x: dict, ens_mem: int | None) -> dict:
     assert isinstance(x, dict), "Input state must be a dictionary"
     if ens_mem is not None:
         x["ensemble_member"] = ens_mem
