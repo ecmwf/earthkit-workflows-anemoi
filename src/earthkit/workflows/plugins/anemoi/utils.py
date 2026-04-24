@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 E = TypeVar("E", bound=ENVIRONMENT)
 
 
-def expansion_qube_from_metadata(metadata: "Metadata", lead_time: "LEAD_TIME") -> Qube:
+def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_time: "LEAD_TIME") -> Qube:
     """Create a Qube object from model metadata and lead time.
 
     This function constructs a Qube object by analysing the model's metadata
@@ -38,7 +38,7 @@ def expansion_qube_from_metadata(metadata: "Metadata", lead_time: "LEAD_TIME") -
 
     Parameters
     ----------
-    metadata : Metadata
+    metadata : Metadata | dict[str, Any]
         Model metadata containing variable definitions, including their vertical
         coordinate information (surface, pressure levels, model levels) and the
         model's time step.
@@ -85,6 +85,11 @@ def expansion_qube_from_metadata(metadata: "Metadata", lead_time: "LEAD_TIME") -
     --------
     Qube : The Qube class for manual qube construction
     """
+    if isinstance(metadata, dict):
+        from anemoi.inference.metadata import MetadataFactory as InferenceMetadataFactory
+
+        metadata = InferenceMetadataFactory(metadata)
+
     variables = metadata.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
     variables_metadata = metadata.typed_variables
     model_step = metadata.timestep.seconds
