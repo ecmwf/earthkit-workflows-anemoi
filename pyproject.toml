@@ -45,9 +45,11 @@ optional-dependencies.docs = [
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.runtime = [
+optional-dependencies.runtime-datasets = [
   "anemoi-datasets>=0.5.21",
-  "anemoi-inference>=0.7",
+]
+optional-dependencies.runtime-inference = [
+  "anemoi-inference>=0.10",
 ]
 optional-dependencies.tests = [ "earthkit-workflows-anemoi[runtime]", "pytest", "pytest-mock", "pytest-xdist" ]
 

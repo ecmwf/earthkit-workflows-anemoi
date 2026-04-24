@@ -149,11 +149,6 @@ def _get_initial_conditions_source(
     return expanded_init
 
 
-def _get_expansion_qube_from_metadata(metadata: Metadata | dict[str, Any], lead_time: LEAD_TIME) -> Qube:
-    lead_time = as_timedelta(lead_time)
-    return expansion_qube_from_metadata(metadata, lead_time)
-
-
 def _run_model(
     expansion_qube: Qube,
     config: RunConfiguration | dict,
@@ -224,19 +219,18 @@ class Inference:
         metadata : Metadata | dict[str, Any] | None, optional
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
         expansion_qube : Qube | None, optional
-            Expansion qube for the model, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
+            Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
         """
         self.ckpt = ckpt
         self.lead_time = lead_time
         self.environment: ENVIRONMENT = environment if environment is not None else []
-        self.metadata = metadata
 
         self.expansion_qube = (
             expansion_qube
             if expansion_qube is not None
-            else _get_expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), lead_time)
+            else expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time))
         )
         self.kwargs = kwargs
 
@@ -471,7 +465,7 @@ def from_config(
     )
 
     return _run_model(
-        _get_expansion_qube_from_metadata(_get_metadata(configuration.checkpoint), configuration.lead_time),  # type: ignore
+        expansion_qube_from_metadata(_get_metadata(configuration.checkpoint), as_timedelta(configuration.lead_time)),  # type: ignore
         configuration,
         input_state_source,
         configuration.lead_time,
@@ -873,7 +867,7 @@ def from_dataset(
         payload_metadata={"environment": environment["initial_conditions"]},
     )
     return _run_model(
-        _get_expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), lead_time),
+        expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time)),
         runner_config,
         input_state_source,
         lead_time,
