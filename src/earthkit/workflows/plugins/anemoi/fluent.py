@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
-def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | None = None) -> Metadata:
+def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | dict[str, Any] | None = None) -> Metadata | dict[str, Any]:
     if metadata is not None:
         return metadata
 
@@ -149,7 +149,7 @@ def _get_initial_conditions_source(
 
 
 def _run_model(
-    metadata: Metadata,
+    metadata: Metadata | dict[str, Any],
     config: RunConfiguration | dict,
     input_state_source: fluent.Action,
     lead_time: LEAD_TIME,
@@ -161,7 +161,7 @@ def _run_model(
 
     Parameters
     ----------
-    metadata : Metadata
+    metadata : Metadata | dict[str, Any]
         `anemoi.inference` metadata
     config : RunConfiguration | dict
         Configuration object
@@ -203,7 +203,7 @@ class Inference:
         lead_time: LEAD_TIME,
         *,
         environment: ENVIRONMENT | None = None,
-        metadata: Metadata | None = None,
+        metadata: Metadata | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -216,7 +216,7 @@ class Inference:
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         environment : ENVIRONMENT, optional
             Environment to run the model in, by default None
-        metadata : Optional[Metadata], optional
+        metadata : Metadata | dict[str, Any] | None, optional
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
@@ -224,7 +224,7 @@ class Inference:
         self.ckpt = ckpt
         self.lead_time = lead_time
         self.environment: ENVIRONMENT = environment if environment is not None else []
-        self.metadata: Metadata = _get_metadata(ckpt, metadata=metadata)
+        self.metadata = _get_metadata(ckpt, metadata=metadata)
         self.kwargs: dict[str, Any] = kwargs
 
     def _config(self, **kwargs: Any) -> dict[str, Any]:
