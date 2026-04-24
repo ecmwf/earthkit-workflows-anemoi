@@ -230,15 +230,15 @@ def parse_ensemble_members(ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | No
     return list(ensemble_members)
 
 
+def _empty_payload(x, ens_mem: int | None):
+    assert isinstance(x, dict), "Input state must be a dictionary"
+    if ens_mem is not None:
+        x["ensemble_member"] = ens_mem
+    return x
+
+
 def faked_ensemble_transform(act: fluent.Action, ens_num: int | None = None) -> fluent.Action:
     """Transform the action to simulate ensemble members"""
-
-    def _empty_payload(x, ens_mem: int | None):
-        assert isinstance(x, dict), "Input state must be a dictionary"
-        if ens_mem is not None:
-            x["ensemble_member"] = ens_mem
-        return x
-
     return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
 
 
