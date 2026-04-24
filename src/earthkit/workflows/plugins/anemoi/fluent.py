@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from anemoi.utils.dates import as_timedelta
 from earthkit.data.utils.dates import to_datetime
 from earthkit.workflows.fluent import capture_payload_metadata
+from qubed import Qube
 
 from earthkit.workflows import fluent
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
-def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | None = None) -> Metadata:
+def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | dict[str, Any] | None = None) -> Metadata | dict[str, Any]:
     if metadata is not None:
         return metadata
 
@@ -149,7 +150,7 @@ def _get_initial_conditions_source(
 
 
 def _run_model(
-    metadata: Metadata,
+    expansion_qube: Qube,
     config: RunConfiguration | dict,
     input_state_source: fluent.Action,
     lead_time: LEAD_TIME,
@@ -161,8 +162,8 @@ def _run_model(
 
     Parameters
     ----------
-    metadata : Metadata
-        `anemoi.inference` metadata
+    expansion_qube : Qube
+        Expansion qube for the model, can be got from the metadata using `utils.expansion_qube_from_metadata`
     config : RunConfiguration | dict
         Configuration object
     input_state_source : fluent.Action
@@ -180,18 +181,16 @@ def _run_model(
     fluent.Action
         Cascade action of the model results
     """
-    lead_time = as_timedelta(lead_time)
 
     model_payload = fluent.Payload(
         "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config",
         args=(fluent.Node.input_name(0),),
-        kwargs=dict(config=config, lead_time=lead_time, **kwargs),
+        kwargs=dict(config=config, lead_time=as_timedelta(lead_time), **kwargs),
         metadata=payload_metadata,
     )
 
-    qube = expansion_qube_from_metadata(metadata, lead_time)
-    model_results = input_state_source.map(model_payload, yields=("step", list(qube.axes()["step"])))
-    return model_results.expand_as_qube(qube.remove_by_key("step"))
+    model_results = input_state_source.map(model_payload, yields=("step", list(expansion_qube.axes()["step"])))
+    return model_results.expand_as_qube(expansion_qube.remove_by_key("step"))
 
 
 class Inference:
@@ -203,7 +202,8 @@ class Inference:
         lead_time: LEAD_TIME,
         *,
         environment: ENVIRONMENT | None = None,
-        metadata: Metadata | None = None,
+        metadata: Metadata | dict[str, Any] | None = None,
+        expansion_qube: Qube | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -216,16 +216,23 @@ class Inference:
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         environment : ENVIRONMENT, optional
             Environment to run the model in, by default None
-        metadata : Optional[Metadata], optional
+        metadata : Metadata | dict[str, Any] | None, optional
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+        expansion_qube : Qube | None, optional
+            Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
         """
         self.ckpt = ckpt
         self.lead_time = lead_time
         self.environment: ENVIRONMENT = environment if environment is not None else []
-        self.metadata: Metadata = _get_metadata(ckpt, metadata=metadata)
-        self.kwargs: dict[str, Any] = kwargs
+
+        self.expansion_qube = (
+            expansion_qube
+            if expansion_qube is not None
+            else expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time))
+        )
+        self.kwargs = kwargs
 
     def _config(self, **kwargs: Any) -> dict[str, Any]:
         return {"checkpoint": self.ckpt, **self.kwargs, **kwargs}
@@ -239,7 +246,7 @@ class Inference:
         **kwargs: Any,
     ) -> fluent.Action:
         return _run_model(
-            self.metadata,
+            self.expansion_qube,
             config,
             input_state_source,
             self.lead_time,
@@ -458,7 +465,7 @@ def from_config(
     )
 
     return _run_model(
-        _get_metadata(configuration.checkpoint, metadata=None),  # type: ignore
+        expansion_qube_from_metadata(_get_metadata(configuration.checkpoint), as_timedelta(configuration.lead_time)),  # type: ignore
         configuration,
         input_state_source,
         configuration.lead_time,
@@ -860,7 +867,7 @@ def from_dataset(
         payload_metadata={"environment": environment["initial_conditions"]},
     )
     return _run_model(
-        _get_metadata(ckpt, metadata=metadata),
+        expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time)),
         runner_config,
         input_state_source,
         lead_time,

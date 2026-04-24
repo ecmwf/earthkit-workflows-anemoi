@@ -29,7 +29,7 @@ For both workflow creation and local execution:
 
 .. code:: bash
 
-   pip install 'earthkit-workflows-anemoi[runtime]'
+   pip install 'earthkit-workflows-anemoi[runtime-inference,runtime-datasets]'
 
 This includes the optional runtime dependencies:
 
