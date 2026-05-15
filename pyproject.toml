@@ -49,7 +49,7 @@ optional-dependencies.runtime-datasets = [
   "anemoi-datasets>=0.5.21",
 ]
 optional-dependencies.runtime-inference = [
-  "anemoi-inference>=0.10",
+  "anemoi-inference>=0.10,<0.11",
 ]
 optional-dependencies.tests = [
   "earthkit-workflows-anemoi[runtime-inference,runtime-datasets]",
