@@ -18,4 +18,4 @@ DATE = Union[datetime.datetime, tuple[int, int, int], str]
 ENVIRONMENT = Union[Mapping[str, list[str]], list[str]]
 
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
-ENSEMBLE_DIMENSION_NAME: str = "ensemble_member"
+ENSEMBLE_DIMENSION_NAME: str = "number"
