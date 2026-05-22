@@ -389,6 +389,7 @@ class Inference:
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
+    @capture_payload_metadata
     def get_initial_conditions(self, input: str | dict[str, Any], date: DATE, **kwargs: Any) -> fluent.Action:
         """
         Get initial conditions for an anemoi inference model.
