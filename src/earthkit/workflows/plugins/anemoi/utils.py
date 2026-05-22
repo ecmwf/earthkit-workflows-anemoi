@@ -230,7 +230,7 @@ def parse_ensemble_members(ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | No
     return list(ensemble_members)
 
 
-def _empty_payload(x: dict, ens_mem: int | None) -> dict:
+def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
     assert isinstance(x, dict), "Input state must be a dictionary"
     if ens_mem is not None:
         x["ensemble_member"] = ens_mem
@@ -239,7 +239,7 @@ def _empty_payload(x: dict, ens_mem: int | None) -> dict:
 
 def faked_ensemble_transform(act: fluent.Action, ens_num: int | None = None) -> fluent.Action:
     """Transform the action to simulate ensemble members"""
-    return act.map(fluent.Payload(_empty_payload, [fluent.Node.input_name(0), ens_num]))
+    return act.map(fluent.Payload(expose_ensemble_dimension, [fluent.Node.input_name(0), ens_num]))
 
 
 def _add_self_to_environment(environment: E) -> E:
@@ -249,7 +249,7 @@ def _add_self_to_environment(environment: E) -> E:
     Parameters
     ----------
     environment : list[str] | dict[str, list[str]]
-        Environment list to self in place to
+        Environment list to add self in place to
 
     Returns
     -------
