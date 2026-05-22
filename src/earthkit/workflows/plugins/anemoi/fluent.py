@@ -389,39 +389,6 @@ class Inference:
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
-    @capture_payload_metadata
-    def get_initial_conditions(self, input: str | dict[str, Any], date: DATE, **kwargs: Any) -> fluent.Action:
-        """
-        Get initial conditions for an anemoi inference model.
-
-        Parameters
-        ----------
-        input : str | dict[str, Any]
-            Input data for the model
-        date : DATE
-            Date for the initial conditions
-        kwargs : dict
-            Additional arguments to pass to the runner configuration
-
-        Returns
-        -------
-        fluent.Action
-            earthkit.workflows action of the initial conditions
-
-        Examples
-        --------
-        >>> from earthkit.workflows.plugins.anemoi.fluent import Inference
-        >>> inference = Inference("anemoi_model.ckpt", lead_time = "10D")
-        >>> inference.get_initial_conditions("mars", date = "2021-01-01T00:00:00")
-        """
-        config = self._config(input=input, **kwargs)
-        environment_dict = crack_environment(self.environment, ["initial_conditions"])
-        return _get_initial_conditions_source(
-            config=config,
-            date=date,
-            payload_metadata={"environment": environment_dict["initial_conditions"]},
-        )
-
 
 @capture_payload_metadata
 def from_config(
@@ -634,7 +601,6 @@ def get_initial_conditions(
     date: DATE,
     *,
     environment: ENVIRONMENT | None = None,
-    metadata: Metadata | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -653,8 +619,6 @@ def get_initial_conditions(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
-    metadata : Optional[Metadata], optional
-        `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -668,9 +632,12 @@ def get_initial_conditions(
     >>> from earthkit.workflows.plugins.anemoi.fluent import get_initial_conditions
     >>> get_initial_conditions("anemoi_model.ckpt", "input_data", date = "2021-01-01T00:00:00")
     """
-    return Inference(ckpt, environment=environment, metadata=metadata, **kwargs).get_initial_conditions(
-        input,
-        date,
+    config = {"checkpoint": ckpt, "input": input, **kwargs}
+    environment_dict = crack_environment(environment, ["initial_conditions"])
+    return _get_initial_conditions_source(
+        config=config,
+        date=date,
+        payload_metadata={"environment": environment_dict["initial_conditions"]},
     )
 
 
