@@ -26,6 +26,7 @@ from earthkit.data.utils.dates import to_datetime
 from earthkit.workflows import mark
 
 from .runner import CascadeRunner
+from .types import ENSEMBLE_DIMENSION_NAME
 
 if TYPE_CHECKING:
     from anemoi.inference.input import Input
@@ -52,7 +53,7 @@ def _get_initial_conditions_ens(input: Input, ens_mem: int, date: DATE) -> State
 
     input_state = input.create_input_state(date=to_datetime(date))
     assert isinstance(input_state, dict), "Input state must be a dictionary"
-    input_state["ensemble_member"] = ens_mem
+    input_state[ENSEMBLE_DIMENSION_NAME] = ens_mem
 
     return input_state
 
@@ -182,7 +183,11 @@ def convert_to_fieldlist(
                 "shortName": variable.param,
                 "param": variable.param,
                 "latitudes": state["latitudes"],
-                "longitudes": np.where(state["longitudes"] > 180, state["longitudes"] - 360, state["longitudes"]),
+                "longitudes": np.where(
+                    state["longitudes"] > 180,
+                    state["longitudes"] - 360,
+                    state["longitudes"],
+                ),
             }
         )
         if "levtype" in variable.grib_keys:
@@ -197,7 +202,10 @@ def convert_to_fieldlist(
 
 @mark.needs_gpu
 def run_as_earthkit(
-    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] | None = None
+    input_state: dict,
+    runner: CascadeRunner,
+    lead_time: LEAD_TIME,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Generator[ekd.SimpleFieldList]:
     """
     Run the model and yield the results as earthkit FieldList
@@ -220,7 +228,7 @@ def run_as_earthkit(
     """
 
     initial_date: datetime.datetime = input_state["date"]
-    ensemble_member = input_state.get("ensemble_member", None)
+    ensemble_member = input_state.get(ENSEMBLE_DIMENSION_NAME, None)
     extra_metadata = extra_metadata or {}
 
     post_processors = runner.create_post_processors()
@@ -253,7 +261,10 @@ def run_as_earthkit_from_config(
 
 @mark.needs_gpu
 def collect_as_earthkit(
-    input_state: dict, runner: CascadeRunner, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] | None = None
+    input_state: dict,
+    runner: CascadeRunner,
+    lead_time: LEAD_TIME,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> ekd.SimpleFieldList:
     """
     Collect the results of the model run as earthkit FieldList
