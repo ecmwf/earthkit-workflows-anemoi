@@ -1,0 +1,276 @@
+# (C) Copyright 2026- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""Fixtures for integration tests.
+
+Provides a lightweight graph executor that traverses the DAG built by the
+fluent API and calls each payload's function, with anemoi-inference
+functions mocked so that no GPU or model weights are required.
+"""
+
+from __future__ import annotations
+
+import datetime
+import importlib
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+import yaml
+from anemoi.inference.testing import fake_checkpoints
+from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
+from earthkit.workflows.fluent import Action, Payload
+from earthkit.workflows.graph import Node, Output
+
+from earthkit.workflows import serialise
+
+# ---------------------------------------------------------------------------
+# Helpers: resolve and execute payloads
+# ---------------------------------------------------------------------------
+
+
+def _resolve_func(func):
+    """Resolve a string function reference to a callable."""
+    if isinstance(func, str):
+        module_path, _, func_name = func.rpartition(".")
+        module = importlib.import_module(module_path)
+        return getattr(module, func_name)
+    return func
+
+
+def _make_fake_fieldlist(step: int, ensemble_member: int | None = None):
+    """Create a minimal fake fieldlist-like object for test outputs."""
+    fields = []
+    for param in ["2t", "10u", "10v", "msl", "tcc", "tp"]:
+        field = MagicMock()
+        field.metadata.return_value = {
+            "param": param,
+            "step": step,
+            "number": ensemble_member,
+        }
+        field.values = np.random.randn(100)
+        fields.append(field)
+
+    fieldlist = MagicMock()
+    fieldlist.fields = fields
+    fieldlist.__iter__ = lambda self: iter(fields)
+    fieldlist.__len__ = lambda self: len(fields)
+    return fieldlist
+
+
+def _make_fake_state(date: datetime.datetime, step_hours: int = 6) -> dict:
+    """Create a minimal fake anemoi state dict."""
+    return {
+        "date": date + datetime.timedelta(hours=step_hours),
+        "latitudes": np.linspace(-90, 90, 100),
+        "longitudes": np.linspace(0, 360, 100),
+        "fields": {
+            "2t": np.random.randn(100),
+            "10u": np.random.randn(100),
+            "10v": np.random.randn(100),
+            "msl": np.random.randn(100),
+            "tcc": np.random.randn(100),
+            "tp": np.random.randn(100),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mock implementations of anemoi inference functions
+# ---------------------------------------------------------------------------
+
+
+def mock_get_initial_conditions_from_config(config, date, ens_mem=None, **kwargs):
+    """Mock replacement for _get_initial_conditions_from_config."""
+    from earthkit.data.utils.dates import to_datetime
+
+    from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
+
+    state = {
+        "date": to_datetime(date),
+        "latitudes": np.linspace(-90, 90, 100),
+        "longitudes": np.linspace(0, 360, 100),
+        "fields": {
+            "2t": np.random.randn(100),
+            "10u": np.random.randn(100),
+            "10v": np.random.randn(100),
+            "msl": np.random.randn(100),
+            "tcc": np.random.randn(100),
+            "tp": np.random.randn(100),
+        },
+    }
+    if ens_mem is not None:
+        state[ENSEMBLE_DIMENSION_NAME] = ens_mem
+    return state
+
+
+def mock_run_as_earthkit_from_config(input_state, config, lead_time, **kwargs):
+    """Mock replacement for run_as_earthkit_from_config.
+
+    Yields one fake fieldlist per 6h step up to lead_time.
+    """
+    from anemoi.utils.dates import frequency_to_seconds
+
+    from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
+
+    lead_time_seconds = frequency_to_seconds(lead_time)
+    model_step = 6 * 3600  # 6h steps
+    ensemble_member = input_state.get(ENSEMBLE_DIMENSION_NAME, None)
+
+    for step_seconds in range(model_step, lead_time_seconds + model_step, model_step):
+        step_hours = step_seconds // 3600
+        yield _make_fake_fieldlist(step_hours, ensemble_member)
+
+
+# ---------------------------------------------------------------------------
+# Graph executor
+# ---------------------------------------------------------------------------
+
+
+class SimpleGraphExecutor:
+    """Execute a fluent Action's graph by topologically traversing nodes.
+
+    This is a minimal executor for integration testing. It resolves payload
+    functions, calls them with their arguments, and collects results.
+    Payloads whose functions are in the mock registry get replaced with mocks.
+    """
+
+    def __init__(self, mock_registry: dict[str, Any] | None = None):
+        self.mock_registry = mock_registry or {}
+        self.results: dict[str, Any] = {}
+
+    def execute(self, action: Action) -> dict[str, Any]:
+        """Execute all nodes in the action's graph."""
+        graph = action.graph()
+        serialised = serialise(graph)
+
+        # Topological order: sources first
+        ordered = list(graph.nodes(forwards=True))
+
+        for node in ordered:
+            self._execute_node(node, serialised)
+
+        return self.results
+
+    def _execute_node(self, node: Node, serialised: dict) -> Any:
+        if node.name in self.results:
+            return self.results[node.name]
+
+        # Resolve inputs
+        input_values = {}
+        for input_name, output in node.inputs.items():
+            parent = output.parent if isinstance(output, Output) else output
+            if parent.name not in self.results:
+                self._execute_node(parent, serialised)
+            input_values[input_name] = self.results[parent.name]
+
+        # Execute payload
+        payload = node.payload
+        if payload is None:
+            self.results[node.name] = None
+            return None
+
+        if isinstance(payload, Payload):
+            func = payload.func
+            func_key = func if isinstance(func, str) else getattr(func, "__qualname__", str(func))
+
+            # Check mock registry
+            if func_key in self.mock_registry:
+                func = self.mock_registry[func_key]
+            else:
+                func = _resolve_func(func)
+
+            # Build args, replacing Node.input_name references with actual values
+
+            args = []
+            for arg in payload.args:
+                if isinstance(arg, str) and arg.startswith("input"):
+                    # This is a reference to an input node
+                    matching = [v for k, v in input_values.items()]
+                    if matching:
+                        args.append(matching[0])
+                    else:
+                        args.append(arg)
+                else:
+                    args.append(arg)
+
+            kwargs = dict(payload.kwargs)
+
+            try:
+                result = func(*args, **kwargs)
+                # If it's a generator, consume it
+                if hasattr(result, "__next__"):
+                    result = list(result)
+            except Exception as e:
+                result = f"ERROR: {e}"
+
+            self.results[node.name] = result
+            return result
+        else:
+            # Raw callable payload
+            if callable(payload):
+                result = payload()
+            else:
+                result = payload
+            self.results[node.name] = result
+            return result
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_registry():
+    """Registry mapping function paths to their mock replacements."""
+    return {
+        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config": mock_get_initial_conditions_from_config,
+        "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config": mock_run_as_earthkit_from_config,
+    }
+
+
+@pytest.fixture
+def executor(mock_registry):
+    """A SimpleGraphExecutor wired up with mocks."""
+    return SimpleGraphExecutor(mock_registry)
+
+
+@pytest.fixture
+@fake_checkpoints
+def simple_ckpt_path():
+    return str((Path(__file__).parent.parent / "checkpoints" / "simple.yaml").absolute())
+
+
+@pytest.fixture
+@fake_checkpoints
+def full_atmo_ckpt_path():
+    return str((Path(__file__).parent.parent / "checkpoints" / "full_atmo.yaml").absolute())
+
+
+@pytest.fixture
+@fake_checkpoints
+def mock_config(tmp_path: Path):
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "simple.yaml"
+
+    config_dict = yaml.safe_load(config_path.read_text())
+    config_dict["checkpoint"] = f"{parent_dir}/{config_dict['checkpoint']}"
+
+    with open(tmp_path / "simple.yaml", "w") as f:
+        yaml.safe_dump(config_dict, f)
+
+    tmp_path = tmp_path / "simple.yaml"
+
+    return MockRunConfiguration.load(
+        str(tmp_path.absolute()),
+        overrides=dict(runner="testing", device="cpu", input="dummy"),
+    )

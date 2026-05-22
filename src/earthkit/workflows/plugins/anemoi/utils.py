@@ -18,7 +18,7 @@ from qubed import Qube
 
 from earthkit.workflows import fluent
 
-from .types import ENVIRONMENT
+from .types import ENSEMBLE_DIMENSION_NAME, ENVIRONMENT
 
 if TYPE_CHECKING:
     from anemoi.inference.metadata import Metadata
@@ -97,7 +97,10 @@ def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_tim
 
 
 def expansion_qube_from_variables(
-    variables: list[str], variables_metadata: dict, model_step: int, lead_time: "LEAD_TIME"
+    variables: list[str],
+    variables_metadata: dict,
+    model_step: int,
+    lead_time: "LEAD_TIME",
 ) -> Qube:
     """Create a Qube object from a list of variable names, their metadata, model step, and lead time.
 
@@ -160,14 +163,24 @@ def expansion_qube_from_variables(
     return _expansion_qube(variables, variables_metadata, model_step, lead_time)
 
 
-def _expansion_qube(variables: list[str], variables_metadata: dict, model_step: int, lead_time: "LEAD_TIME") -> Qube:
+def _expansion_qube(
+    variables: list[str],
+    variables_metadata: dict,
+    model_step: int,
+    lead_time: "LEAD_TIME",
+) -> Qube:
     """Create a Qube object from elements from model metadata and lead time."""
     surface_variables = {variables_metadata[var] for var in variables if variables_metadata[var].is_surface_level}
     pressure_variables = {variables_metadata[var] for var in variables if variables_metadata[var].is_pressure_level}
     model_variables = {variables_metadata[var] for var in variables if variables_metadata[var].is_model_level}
 
     lead_time_seconds = frequency_to_seconds(lead_time)
-    steps = list(map(lambda x: x // 3600, range(model_step, lead_time_seconds + model_step, model_step)))
+    steps = list(
+        map(
+            lambda x: x // 3600,
+            range(model_step, lead_time_seconds + model_step, model_step),
+        )
+    )
 
     def make_qubes(objs: list[dict[str, Sequence]], metadata: dict[str, Any]) -> Qube:
         if not objs:
@@ -219,7 +232,9 @@ def _expansion_qube(variables: list[str], variables_metadata: dict, model_step: 
     return pressure_qube | model_qube | surface_qube
 
 
-def parse_ensemble_members(ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | None") -> list[int] | list[None]:
+def parse_ensemble_members(
+    ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | None",
+) -> list[int] | list[None]:
     """Parse ensemble members"""
     if ensemble_members is None:
         return [None]
@@ -233,7 +248,7 @@ def parse_ensemble_members(ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | No
 def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
     assert isinstance(x, dict), "Input state must be a dictionary"
     if ens_mem is not None:
-        x["ensemble_member"] = ens_mem
+        x[ENSEMBLE_DIMENSION_NAME] = ens_mem
     return x
 
 

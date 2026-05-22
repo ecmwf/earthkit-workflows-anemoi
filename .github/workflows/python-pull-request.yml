@@ -16,10 +16,19 @@ jobs:
     with:
       skip-hooks: "no-commit-to-branch"
 
-  checks:
+  unit-tests:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     uses: ecmwf/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
     with:
       python-version: ${{ matrix.python-version }}
+
+  integration-tests:
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    uses: ecmwf/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
+    with:
+      python-version: ${{ matrix.python-version }}
+      skip-tests: "integration"
