@@ -86,5 +86,8 @@ log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
 addopts = "-n8"
 
+# Run integration tests separately: pytest tests/integration/
+# Run unit tests only: pytest tests/ --ignore=tests/integration
+
 [tool.uv.sources]
 earthkit-workflows-anemoi = { workspace = true }
