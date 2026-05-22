@@ -23,7 +23,6 @@ jobs:
     uses: ecmwf/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
     with:
       python-version: ${{ matrix.python-version }}
-      custom-pytest: "pytest --ignore=tests/integration"
 
   integration-tests:
     strategy:
@@ -32,4 +31,4 @@ jobs:
     uses: ecmwf/reusable-workflows/.github/workflows/qa-pytest-pyproject.yml@v2
     with:
       python-version: ${{ matrix.python-version }}
-      custom-pytest: "pytest tests/integration/"
+      skip-tests: "integration"

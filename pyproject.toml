@@ -84,10 +84,10 @@ profile = "black"
 log_cli = true
 log_cli_level = "DEBUG"
 testpaths = [ "tests/" ]
-addopts = "-n8"
-
-# Run integration tests separately: pytest tests/integration/
-# Run unit tests only: pytest tests/ --ignore=tests/integration
+addopts = "-n8 -m 'not integration'"
+markers = [
+  "integration: integration tests (deselected by default, run with: pytest -m integration)",
+]
 
 [tool.uv.sources]
 earthkit-workflows-anemoi = { workspace = true }

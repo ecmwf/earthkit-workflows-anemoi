@@ -24,12 +24,15 @@ from __future__ import annotations
 from collections import defaultdict
 
 import numpy as np
+import pytest
 from anemoi.inference.testing import fake_checkpoints
 from earthkit.workflows.fluent import nodetree_arrays
 
 from earthkit.workflows import Cascade, Graph, serialise
 from earthkit.workflows.plugins.anemoi.fluent import Inference, from_initial_conditions, from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
+
+pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Helpers
