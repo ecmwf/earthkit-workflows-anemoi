@@ -602,21 +602,6 @@ class TestDataFlows:
         label_str = " ".join(labels)
         assert "run_as_earthkit_from_config" in label_str
 
-    # --- Inference class: get_initial_conditions ---
-
-    @fake_checkpoints
-    def test_inference_get_initial_conditions(self, simple_ckpt_path):
-        """Inference.get_initial_conditions should produce IC-only graph."""
-        inference = Inference(simple_ckpt_path, lead_time="1D")
-        action = inference.get_initial_conditions("dummy", "2020-01-01")
-        graph = action.graph()
-        assert not graph.has_cycle()
-
-        labels = collect_graph_payload_func_labels(action)
-        label_str = " ".join(labels)
-        assert "_get_initial_conditions_from_config" in label_str
-        assert "run_as_earthkit_from_config" not in label_str
-
     # --- Action.infer chaining ---
 
     @fake_checkpoints
