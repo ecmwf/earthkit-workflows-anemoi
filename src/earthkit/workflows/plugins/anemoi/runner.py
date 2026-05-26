@@ -18,7 +18,7 @@ import logging
 import os
 
 from anemoi.inference.config.run import RunConfiguration
-from anemoi.inference.forcings import ComputedForcings, CoupledForcings, Forcings
+from anemoi.inference.forcings import ComputedForcings, Forcings
 from anemoi.inference.inputs import create_input
 from anemoi.inference.inputs.ekd import EkdInput
 from anemoi.inference.post_processors import create_post_processor
@@ -61,7 +61,7 @@ class CascadeRunner(Runner):
         Input
             The created input.
         """
-        variables = self.variables.retrieved_prognostic_variables()
+        variables = self.variables.default_input_variables()
         input = create_input(self, self.config.input, variables=variables)  # type: ignore # Error in anemoi.inference
         return input
 
@@ -118,11 +118,11 @@ class CascadeRunner(Runner):
         List
             The created constant coupled forcings.
         """
-        variables = self.variables.retrieved_constant_forcings_variables()
-        input = create_input(self, self.config.input, variables=variables)  # type: ignore # Error in anemoi.inference
-        result = CoupledForcings(self, input, variables, mask)
-        LOG.debug("Constant coupled forcing: %s", result)
-        return [result]
+        # This runner does not support coupled forcings
+        # there are supposed to be already in the state dictionary
+        # or managed by the user.
+        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
+        return []
 
     def create_dynamic_coupled_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
         """Create dynamic coupled forcings.

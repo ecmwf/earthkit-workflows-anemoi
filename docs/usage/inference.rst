@@ -49,3 +49,38 @@ This will use the existing source nodes as the initial conditions, and
 run the inference task with the specified checkpoint, lead time. If the
 source nodes have an ensemble dimension, it will also run the inference
 task for each ensemble member.
+
+****************************
+ Getting Initial Conditions
+****************************
+
+If you need to retrieve the initial conditions separately — for example,
+to inspect them, share them across multiple models, or compose a custom
+workflow — use the
+:func:`~earthkit.workflows.plugins.anemoi.fluent.get_initial_conditions`
+function:
+
+.. code:: python
+
+   from earthkit.workflows.plugins.anemoi import fluent as anemoi_fluent
+
+   CKPT = {"huggingface": "ecmwf/aifs-single-1.0"}
+
+   ic = anemoi_fluent.get_initial_conditions(
+       CKPT,
+       "mars",
+       date="2022-01-01T00:00",
+   )
+
+This returns a :class:`~earthkit.workflows.fluent.Action` representing
+the initial state. You can then feed it into an inference run:
+
+.. code:: python
+
+   inference = anemoi_fluent.Inference(CKPT, lead_time="7D")
+   forecast = inference.from_initial_conditions(ic)
+
+This two-step approach is equivalent to using
+:func:`~earthkit.workflows.plugins.anemoi.fluent.from_input`, but gives
+you explicit access to the initial conditions action before inference
+begins.
