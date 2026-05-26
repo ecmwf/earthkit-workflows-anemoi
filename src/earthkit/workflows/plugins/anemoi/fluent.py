@@ -235,7 +235,7 @@ class Inference:
         self.kwargs = kwargs
 
     def _config(self, **kwargs: Any) -> dict[str, Any]:
-        if set(*kwargs.keys()) & {"checkpoint", *self.kwargs.keys()}:
+        if set(kwargs.keys()) & {"checkpoint", *self.kwargs.keys()}:
             raise ValueError(
                 f"Cannot override checkpoint or keys set in the constructor: {set(kwargs.keys()) & {'checkpoint', *self.kwargs.keys()}}"
             )
@@ -389,38 +389,6 @@ class Inference:
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
-    def get_initial_conditions(self, input: str | dict[str, Any], date: DATE, **kwargs: Any) -> fluent.Action:
-        """
-        Get initial conditions for an anemoi inference model.
-
-        Parameters
-        ----------
-        input : str | dict[str, Any]
-            Input data for the model
-        date : DATE
-            Date for the initial conditions
-        kwargs : dict
-            Additional arguments to pass to the runner configuration
-
-        Returns
-        -------
-        fluent.Action
-            earthkit.workflows action of the initial conditions
-
-        Examples
-        --------
-        >>> from earthkit.workflows.plugins.anemoi.fluent import Inference
-        >>> inference = Inference("anemoi_model.ckpt", lead_time = "10D")
-        >>> inference.get_initial_conditions("mars", date = "2021-01-01T00:00:00")
-        """
-        config = self._config(input=input, **kwargs)
-        environment_dict = crack_environment(self.environment, ["initial_conditions"])
-        return _get_initial_conditions_source(
-            config=config,
-            date=date,
-            payload_metadata={"environment": environment_dict["initial_conditions"]},
-        )
-
 
 @capture_payload_metadata
 def from_config(
@@ -501,7 +469,10 @@ def from_config(
     )
 
     return _run_model(
-        expansion_qube_from_metadata(_get_metadata(configuration.checkpoint), as_timedelta(configuration.lead_time)),  # type: ignore
+        expansion_qube_from_metadata(
+            _get_metadata(configuration.checkpoint),
+            as_timedelta(configuration.lead_time),
+        ),  # type: ignore
         configuration,
         input_state_source,
         configuration.lead_time,
@@ -633,43 +604,83 @@ def get_initial_conditions(
     date: DATE,
     *,
     environment: ENVIRONMENT | None = None,
-    metadata: Metadata | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
-    Get initial conditions for an anemoi inference model
+    Get initial conditions for an anemoi inference model.
+
+    Retrieves the initial conditions (model state) needed to start an
+    ``anemoi-inference`` run, without performing the inference itself.
+    This is useful when you want to obtain the initial state separately,
+    for example to inspect it, pass it to multiple models, or use it as
+    input to a custom workflow.
+
+    The checkpoint is used to determine which variables and grid the
+    initial conditions should contain. The ``input`` parameter specifies
+    the data source (e.g. ``"mars"``, ``"grib"``, or a dictionary of
+    input configuration), matching the input sources supported by
+    ``anemoi-inference``.
 
     Parameters
     ----------
     ckpt : VALID_CKPT
-        Checkpoint to load
+        Checkpoint to load. Can be a path to a checkpoint file, a string,
+        or a dictionary (e.g. ``{"huggingface": "ecmwf/aifs-single-1.0"}``).
     input : str | dict[str, Any]
-        Input data for the model
+        ``anemoi-inference`` input source.
+        Can be ``"mars"``, ``"grib"``, etc. or a dictionary of input
+        configuration, following the same conventions as
+        ``anemoi-inference``.
     date : DATE
-        Date for the initial conditions
-    environment : Optional[list[str]], optional
-        Environment to run the model in, by default None
-        If None, will use the current environment
+        Date for the initial conditions. Can be a ``datetime.datetime``,
+        an ISO 8601 string (e.g. ``"2021-01-01T00:00:00"``), or a
+        ``(year, month, day)`` tuple.
+    environment : ENVIRONMENT, optional
+        Environment to run the initial conditions retrieval in, by default None.
+        If None, will use the current environment.
         Should be set to strings, as if used in pip install,
-        e.g. `["anemoi-models==0.3.1"]`
-    metadata : Optional[Metadata], optional
-        `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
-    kwargs : dict
-        Additional arguments to pass to the configuration
+        e.g. ``["anemoi-models==0.3.1"]``.
+        Can be ``dict[str, list[str]]`` with the key ``"initial_conditions"``
+        to set the environment for the retrieval.
+    **kwargs : dict
+        Additional arguments to pass to the run configuration
+        (e.g. extra input overrides).
 
     Returns
     -------
     fluent.Action
-        earthkit.workflows action of the initial conditions
+        An ``earthkit.workflows`` action representing the initial
+        conditions. This action can be passed to
+        :meth:`Inference.from_initial_conditions` or used independently.
 
     Examples
     --------
+    Retrieve initial conditions from MARS:
+
     >>> from earthkit.workflows.plugins.anemoi.fluent import get_initial_conditions
-    >>> get_initial_conditions("anemoi_model.ckpt", "input_data", date = "2021-01-01T00:00:00")
+    >>> ic = get_initial_conditions("anemoi_model.ckpt", "mars", date="2021-01-01T00:00:00")
+
+    Use the initial conditions in a subsequent inference run:
+
+    >>> from earthkit.workflows.plugins.anemoi.fluent import Inference
+    >>> inference = Inference("anemoi_model.ckpt", lead_time="10D")
+    >>> forecast = inference.from_initial_conditions(ic)
+
+    Use a HuggingFace checkpoint with a dictionary input configuration:
+
+    >>> ic = get_initial_conditions(
+    ...     {"huggingface": "ecmwf/aifs-single-1.0"},
+    ...     {"source": "mars", "class": "od"},
+    ...     date="2022-06-15T12:00:00",
+    ... )
     """
-    return Inference(ckpt, environment=environment, metadata=metadata, **kwargs).get_initial_conditions(
-        input,
-        date,
+    config = {"checkpoint": ckpt, "input": input, **kwargs}
+
+    environment_dict = crack_environment(environment, ["initial_conditions"])
+    return _get_initial_conditions_source(
+        config=config,
+        date=date,
+        payload_metadata={"environment": environment_dict["initial_conditions"]},
     )
 
 
@@ -749,12 +760,17 @@ def create_dataset(
         number_of_tasks = len(groups) * 25
 
     path = os.path.abspath(path)
-    options = {"config": config_path, "path": path, "overwrite": overwrite, "test": test}
+    options = {
+        "config": config_path,
+        "path": path,
+        "overwrite": overwrite,
+        "test": test,
+    }
     payload_metadata = {"environment": environment or []}
 
     def get_parallel_options(part: int):
         opt = options.copy()
-        opt["parts"] = f"{part+1}/{number_of_tasks}"
+        opt["parts"] = f"{part + 1}/{number_of_tasks}"
         return opt
 
     def get_task(name: str, opt: dict[str, Any]) -> Callable[..., Any]:
@@ -910,7 +926,9 @@ def from_dataset(
     def construct_configuration(dataset_location: str):
         """Create configuration from dataset location"""
 
-        def insert_dataset_path(template: dict[str, Any] | list[str] | str) -> dict | list | str:
+        def insert_dataset_path(
+            template: dict[str, Any] | list[str] | str,
+        ) -> dict | list | str:
             """Insert the dataset path into the template"""
             if isinstance(template, dict):
                 return {k: insert_dataset_path(v) for k, v in template.items()}
