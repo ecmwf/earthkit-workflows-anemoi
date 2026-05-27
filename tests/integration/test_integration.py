@@ -281,6 +281,27 @@ class TestPayloadMetadataIntegration:
                     for key in custom:
                         assert key in payload["metadata"]
 
+    @fake_checkpoints
+    def test_run_as_earthkit_from_config_has_needs_gpu(self, simple_ckpt_path):
+        """The run_as_earthkit_from_config payload should have needs_gpu=True in metadata."""
+        action = from_input(simple_ckpt_path, "dummy", date="2020-01-01", lead_time="1D")
+        graph = action.graph()
+        model_nodes_found = 0
+        for node in graph.nodes():
+            p = node.payload
+            if (
+                p is not None
+                and hasattr(p, "func")
+                and isinstance(p.func, str)
+                and "run_as_earthkit_from_config" in p.func
+            ):
+                model_nodes_found += 1
+                assert p.metadata.get("needs_gpu") is True, (
+                    f"Node {node.name!r} with func {p.func!r} should have needs_gpu=True "
+                    f"in metadata, got {p.metadata}"
+                )
+        assert model_nodes_found > 0, "No run_as_earthkit_from_config nodes found in graph"
+
 
 # ---------------------------------------------------------------------------
 # Execution tests (with mocked anemoi functions)
