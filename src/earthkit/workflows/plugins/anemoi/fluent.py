@@ -186,7 +186,7 @@ def _run_model(
         "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config",
         args=(fluent.Node.input_name(0),),
         kwargs=dict(config=config, lead_time=as_timedelta(lead_time), **kwargs),
-        metadata=payload_metadata,
+        metadata=dict(**(payload_metadata or {}), needs_gpu=True),
     )
 
     model_results = input_state_source.map(model_payload, yields=("step", list(expansion_qube.axes()["step"])))
