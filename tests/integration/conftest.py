@@ -27,10 +27,57 @@ import pytest
 import yaml
 from anemoi.inference.testing import fake_checkpoints
 from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
-from earthkit.workflows.fluent import Action, Payload
+from earthkit.workflows.fluent import Action, Payload, nodetree_arrays
 from earthkit.workflows.graph import Node, Output
 
 from earthkit.workflows import serialise
+
+# ---------------------------------------------------------------------------
+# Shared test helpers (used across multiple test modules)
+# ---------------------------------------------------------------------------
+
+
+def collect_payloads(action):
+    """Collect all payload function references from an action's nodes."""
+    payloads = []
+    for _, narray in nodetree_arrays(action.nodes):
+        for node in np.atleast_1d(narray.values).flatten():
+            if hasattr(node, "payload") and node.payload is not None:
+                payloads.append(node.payload)
+    return payloads
+
+
+def collect_graph_payload_funcs(action):
+    """Collect all unique payload function paths from an action's full graph.
+
+    Uses graph.nodes() to get ALL nodes including intermediate ones
+    (not just the leaf nodes exposed by nodetree_arrays).
+    """
+    funcs = set()
+    graph = action.graph()
+    for node in graph.nodes():
+        p = node.payload
+        if p is not None and hasattr(p, "func"):
+            f = p.func
+            if isinstance(f, str):
+                funcs.add(f)
+    return funcs
+
+
+def collect_graph_payload_func_labels(action):
+    """Collect all payload function labels (strings or qualnames) from the full graph."""
+    labels = set()
+    graph = action.graph()
+    for node in graph.nodes():
+        p = node.payload
+        if p is not None and hasattr(p, "func"):
+            f = p.func
+            if isinstance(f, str):
+                labels.add(f)
+            elif hasattr(f, "__qualname__"):
+                labels.add(f.__qualname__)
+    return labels
+
 
 # ---------------------------------------------------------------------------
 # Helpers: resolve and execute payloads
@@ -88,8 +135,8 @@ def _make_fake_state(date: datetime.datetime, step_hours: int = 6) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def mock_get_initial_conditions_from_config(config, date, ens_mem=None, **kwargs):
-    """Mock replacement for _get_initial_conditions_from_config."""
+def mock_get_initial_conditions(config, date, ens_mem=None, **kwargs):
+    """Mock replacement for _get_initial_conditions."""
     from earthkit.data.utils.dates import to_datetime
 
     from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
@@ -112,8 +159,8 @@ def mock_get_initial_conditions_from_config(config, date, ens_mem=None, **kwargs
     return state
 
 
-def mock_run_as_earthkit_from_config(input_state, config, lead_time, **kwargs):
-    """Mock replacement for run_as_earthkit_from_config.
+def mock_run_as_earthkit(input_state, config, lead_time, **kwargs):
+    """Mock replacement for run_as_earthkit.
 
     Yields one fake fieldlist per 6h step up to lead_time.
     """
@@ -233,8 +280,8 @@ class SimpleGraphExecutor:
 def mock_registry():
     """Registry mapping function paths to their mock replacements."""
     return {
-        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config": mock_get_initial_conditions_from_config,
-        "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config": mock_run_as_earthkit_from_config,
+        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions": mock_get_initial_conditions,
+        "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit": mock_run_as_earthkit,
     }
 
 

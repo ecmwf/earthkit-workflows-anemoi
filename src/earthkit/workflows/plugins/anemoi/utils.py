@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 E = TypeVar("E", bound=ENVIRONMENT)
 
 
-def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_time: "LEAD_TIME") -> Qube:
+def expansion_qube_from_metadata(metadata: "dict[str, Metadata]", lead_time: "LEAD_TIME") -> dict[str, Qube]:
     """Create a Qube object from model metadata and lead time.
 
     This function constructs a Qube object by analysing the model's metadata
@@ -38,10 +38,11 @@ def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_tim
 
     Parameters
     ----------
-    metadata : Metadata | dict[str, Any]
+    metadata : dict[str, Metadata]
         Model metadata containing variable definitions, including their vertical
         coordinate information (surface, pressure levels, model levels) and the
         model's time step.
+        Must be a dict of dataset names to Metadata objects or dicts that can be converted to Metadata.
     lead_time : LEAD_TIME
         The forecast lead time as an integer or string (e.g., "7D" for 7 days).
         This determines the number of time steps in the expansion.
@@ -49,8 +50,8 @@ def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_tim
 
     Returns
     -------
-    Qube
-        A qube object with a hierarchical structure containing up to three
+    dict[str, Qube]
+        A dictionary of qube objects with a hierarchical structure containing up to three
         branches: surface, pressure, and model level variables. Each branch
         contains the appropriate parameters and coordinates.
 
@@ -85,23 +86,23 @@ def expansion_qube_from_metadata(metadata: "Metadata | dict[str, Any]", lead_tim
     --------
     Qube : The Qube class for manual qube construction
     """
-    if isinstance(metadata, dict):
-        from anemoi.inference.metadata import MetadataFactory as InferenceMetadataFactory
 
-        metadata = InferenceMetadataFactory(metadata)
+    qubes = {}
+    for dataset, md in metadata.items():
+        variables = md.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
+        variables_metadata = md.typed_variables
+        model_step = md.timestep.seconds
+        qubes[dataset] = _expansion_qube(variables, variables_metadata, model_step, lead_time)
 
-    variables = metadata.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
-    variables_metadata = metadata.typed_variables
-    model_step = metadata.timestep.seconds
-    return _expansion_qube(variables, variables_metadata, model_step, lead_time)
+    return qubes
 
 
 def expansion_qube_from_variables(
-    variables: list[str],
-    variables_metadata: dict,
+    variables: dict[str, list[str]],
+    variables_metadata: dict[str, dict],
     model_step: int,
     lead_time: "LEAD_TIME",
-) -> Qube:
+) -> dict[str, Qube]:
     """Create a Qube object from a list of variable names, their metadata, model step, and lead time.
 
     This function constructs a Qube object by analysing the provided list of variable names
@@ -111,10 +112,10 @@ def expansion_qube_from_variables(
 
     Parameters
     ----------
-    variables : list[str]
-        A list of variable names to include in the qube. These should correspond to keys in the
+    variables : dict[str, list[str]]
+        A dictionary mapping dataset names to lists of variable names to include in the qube. These should correspond to keys in the
         variables_metadata dictionary.
-    variables_metadata : dict
+    variables_metadata : dict[str, dict]
         A dictionary mapping variable names to their metadata objects. Each metadata object should
         contain information about whether the variable is a surface level, pressure level, or model level variable,
         as well as its parameter and level information.
@@ -126,8 +127,8 @@ def expansion_qube_from_variables(
 
     Returns
     -------
-    Qube
-        A qube object with a hierarchical structure containing up to three branches: surface, pressure, and model level variables. Each branch contains the appropriate parameters and coordinates.
+    dict[str, Qube]
+        A dictionary mapping dataset names to qube objects with a hierarchical structure containing up to three branches: surface, pressure, and model level variables. Each branch contains the appropriate parameters and coordinates.
 
     Notes
     -----
@@ -160,7 +161,9 @@ def expansion_qube_from_variables(
     Qube : The Qube class for manual qube construction
     expansion_qube_from_metadata : Create a Qube object directly from model metadata.
     """
-    return _expansion_qube(variables, variables_metadata, model_step, lead_time)
+    return {
+        dataset: _expansion_qube(vars, variables_metadata, model_step, lead_time) for dataset, vars in variables.items()
+    }
 
 
 def _expansion_qube(
@@ -187,7 +190,7 @@ def _expansion_qube(
             return Qube.empty()
 
         qubes = [Qube.from_datacube(obj) for obj in objs]
-        combined_qube: Qube = functools.reduce(operator.or_, qubes)  # pyright: ignore[reportArgumentType]
+        combined_qube: Qube = functools.reduce(operator.or_, qubes)  # type: ignore[reportArgumentType]
         combined_qube.add_metadata(metadata)
         return combined_qube
 

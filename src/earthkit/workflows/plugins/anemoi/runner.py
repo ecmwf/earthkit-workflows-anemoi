@@ -10,163 +10,139 @@
 """
 Custom Cascade Runner
 """
-# TODO: Replace with new inference runners and remove
 
 from __future__ import annotations
 
 import logging
-import os
+from datetime import datetime
+from io import BytesIO
+from typing import Literal
 
-from anemoi.inference.config.run import RunConfiguration
-from anemoi.inference.forcings import ComputedForcings, Forcings
+import earthkit.data as ekd
+from anemoi.inference.config.utils import input_types_config, multi_datasets_config
+from anemoi.inference.input import Input
 from anemoi.inference.inputs import create_input
-from anemoi.inference.inputs.ekd import EkdInput
-from anemoi.inference.post_processors import create_post_processor
-from anemoi.inference.pre_processors import create_pre_processor
-from anemoi.inference.processor import Processor
-from anemoi.inference.runner import Runner
-from anemoi.inference.types import IntArray
+from anemoi.inference.metadata import Metadata
+from anemoi.inference.output import Output
+from anemoi.inference.outputs.gribmemory import GribMemoryOutput
+from anemoi.inference.runners import Runner
+from anemoi.inference.variables import Variables
+from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.grib import shortname_to_paramid
+
+from .types import ENSEMBLE_DIMENSION_NAME
 
 LOG = logging.getLogger(__name__)
+
+
+class CascadeOutput(Output):
+    """Custom output class for the CascadeRunner that converts model states to GRIB format and then to earthkit FieldList."""
+
+    def __init__(self, runner: CascadeRunner, metadata: Metadata):
+        super().__init__(runner, metadata)
+
+        self._grib_memory = BytesIO()
+        self.grib_output = GribMemoryOutput(runner, metadata, out=self._grib_memory)
+
+    def write_step(self, state: dict) -> ekd.SimpleFieldList:  # type: ignore[reportIncompatibleMethodOverride]
+
+        initial_date: datetime = state["date"]
+        ensemble_member = state.get(ENSEMBLE_DIMENSION_NAME, None)
+        grib_metadata = {}
+
+        grib_metadata.update(
+            {
+                "edition": 2,
+                "type": "fc",
+                "class": "ai",
+            }
+        )
+        if ensemble_member is not None:
+            grib_metadata.update(
+                {
+                    "productDefinitionTemplateNumber": 1,
+                    "type": "pf",
+                    "stream": "enfo",
+                    "number": ensemble_member,
+                }
+            )
+
+        try:
+
+            self.grib_output.write_state(state)
+            self._grib_memory.seek(0, 0)
+            fieldlist: ekd.SimpleFieldList = ekd.from_source("stream", self._grib_memory, read_all=True)  # type: ignore[reportAssignmentType]
+            self._grib_memory.seek(0, 0)
+
+            return fieldlist
+
+        except Exception:
+            LOG.error("Error converting state to grib, will convert to ArrayField.", exc_info=True)
+
+        import numpy as np
+
+        fields = []
+
+        step = frequency_to_seconds(state["date"] - initial_date) // 3600
+
+        for var, array in state["fields"].items():
+            variable = self.typed_variables[var]
+            paramId = shortname_to_paramid(variable.param)
+
+            grib_metadata.update(
+                {
+                    "step": step,
+                    "base_datetime": initial_date,
+                    "valid_datetime": state["date"],
+                    "paramId": paramId,
+                    "shortName": variable.param,
+                    "param": variable.param,
+                    "latitudes": state["latitudes"],
+                    "longitudes": np.where(
+                        state["longitudes"] > 180,
+                        state["longitudes"] - 360,
+                        state["longitudes"],
+                    ),
+                }
+            )
+            if "levtype" in variable.grib_keys:
+                grib_metadata["levtype"] = variable.grib_keys["levtype"]
+            if variable.level is not None:
+                grib_metadata["level"] = variable.level
+
+            fields.append(ekd.ArrayField(array, grib_metadata.copy()))
+
+        return ekd.SimpleFieldList.from_fields(fields)
 
 
 class CascadeRunner(Runner):
     """Cascade Inference Runner"""
 
-    def __init__(self, config: RunConfiguration | dict):
-        if isinstance(config, dict):
-            config = RunConfiguration(**config)
+    outputs: dict[str, CascadeOutput]  # type: ignore[reportIncompatibleVariableOverride]
 
-        self.config = config
+    def create_input(
+        self,
+        input_type: Literal["prognostics", "constant_forcings", "dynamic_forcings", "boundary_forcings"],
+        dataset_name: str,
+        metadata: Metadata,
+    ) -> Input:
+        variables = Variables(metadata)
+        match input_type:
+            case "prognostics":
+                variables = (
+                    variables.default_input_variables()
+                )  # Only difference to parent class, to get all variables as prognostics
+                config = input_types_config(self.config, "prognostic_input", "input") if variables else "empty"  # type: ignore[reportArgumentType]
+            case _:
+                return super().create_input(input_type, dataset_name, metadata)
 
-        for key, val in config.env.items():
-            LOG.debug("Setting environment variable %s=%s", key, val)
-            os.environ[key] = str(val)
+        config = multi_datasets_config(config, dataset_name, self.dataset_names)
+        input = create_input(self, config, metadata, variables=variables, purpose=input_type)  # type: ignore[reportArgumentType]
 
-        super().__init__(
-            config.checkpoint,  # type: ignore # Error in anemoi.inference
-            device=config.device,
-            precision=config.precision,
-            allow_nans=config.allow_nans,
-            verbosity=config.verbosity,
-            patch_metadata=config.patch_metadata,
-            typed_variables=config.typed_variables,
-        )
-
-    def create_input(self) -> EkdInput:
-        """Create the input.
-
-        Returns
-        -------
-        Input
-            The created input.
-        """
-        variables = self.variables.default_input_variables()
-        input = create_input(self, self.config.input, variables=variables)  # type: ignore # Error in anemoi.inference
+        LOG.info(f"[{dataset_name}] {input_type.replace('_', ' ').capitalize()} input: {input}")
         return input
 
-    def create_constant_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
-        """Create constant computed forcings.
-
-        Parameters
-        ----------
-        variables : List[str]
-            The variables for the forcings.
-        mask : IntArray
-            The mask for the forcings.
-
-        Returns
-        -------
-        List[Forcings]
-            The created constant computed forcings.
-        """
-        result = ComputedForcings(self, variables, mask)
-        LOG.debug("Constant computed forcing: %s", result)
-        return [result]
-
-    def create_dynamic_computed_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
-        """Create dynamic computed forcings.
-
-        Parameters
-        ----------
-        variables : List[str]
-            The variables for the forcings.
-        mask : IntArray
-            The mask for the forcings.
-
-        Returns
-        -------
-        List[Forcings]
-            The created dynamic computed forcings.
-        """
-        result = ComputedForcings(self, variables, mask)
-        LOG.debug("Dynamic computed forcing: %s", result)
-        return [result]
-
-    def create_constant_coupled_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
-        """Create constant coupled forcings.
-
-        Parameters
-        ----------
-        variables : List[str]
-            The variables for the forcings.
-        mask : IntArray
-            The mask for the forcings.
-
-        Returns
-        -------
-        List
-            The created constant coupled forcings.
-        """
-        # This runner does not support coupled forcings
-        # there are supposed to be already in the state dictionary
-        # or managed by the user.
-        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
-        return []
-
-    def create_dynamic_coupled_forcings(self, variables: list[str], mask: IntArray) -> list[Forcings]:
-        """Create dynamic coupled forcings.
-
-        Parameters
-        ----------
-        variables : List[str]
-            The variables for the forcings.
-        mask : IntArray
-            The mask for the forcings.
-
-        Returns
-        -------
-        List
-            The created dynamic coupled forcings.
-        """
-        # This runner does not support coupled forcings
-        # there are supposed to be already in the state dictionary
-        # or managed by the user.
-        LOG.warning("Coupled forcings are not supported by this runner: %s", variables)
-        return []
-
-    def create_pre_processors(self) -> list[Processor]:
-        """Create pre-processors.
-
-        Returns
-        -------
-        List[Processor]
-            The created pre-processors.
-        """
-        result = []
-        for processor in self.config.pre_processors:
-            result.append(create_pre_processor(self, processor))
-        return result
-
-    def create_post_processors(self) -> list[Processor]:
-        """Create post-processors.
-
-        Returns
-        -------
-        List[Processor]
-            The created post-processors.
-        """
-        result = []
-        for processor in self.config.post_processors:
-            result.append(create_post_processor(self, processor))
-        return result
+    def create_output(self, dataset_name: str, metadata: Metadata) -> CascadeOutput:
+        output = CascadeOutput(self, metadata)  # Force the use of CascadeOutput for all datasets
+        LOG.info(f"[{dataset_name}] Output: {output}")
+        return output

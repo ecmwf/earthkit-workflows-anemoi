@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from anemoi.utils.dates import as_timedelta
 from earthkit.data.utils.dates import to_datetime
@@ -37,16 +37,18 @@ if TYPE_CHECKING:
     from .types import DATE, ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME, VALID_CKPT
 
 LOG = logging.getLogger(__name__)
+T = TypeVar("T")
+DEFAULT_DATASET_NAME = "data"
 
 
-def _get_metadata(ckpt: VALID_CKPT, *, metadata: Metadata | dict[str, Any] | None = None) -> Metadata | dict[str, Any]:
+def _get_metadata(ckpt: VALID_CKPT, *, metadata: dict[str, Metadata] | None = None) -> dict[str, Metadata]:
     if metadata is not None:
         return metadata
 
     from anemoi.inference.checkpoint import Checkpoint
 
     checkpoint = Checkpoint(ckpt)  # type: ignore
-    return checkpoint._metadata
+    return checkpoint.multi_dataset_metadata  # type: ignore[reportReturnType]
 
 
 def _get_initial_conditions_source(
@@ -89,7 +91,7 @@ def _get_initial_conditions_source(
             init_conditions = config.transform(
                 lambda x, *a: x.map(
                     fluent.Payload(
-                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config",
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
                         args=(fluent.Node.input_name(0)),
                         kwargs=dict(ens_num=a[0], date=date),
                         metadata=payload_metadata,
@@ -106,7 +108,7 @@ def _get_initial_conditions_source(
                 [
                     # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
                     fluent.Payload(
-                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config",
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
                         kwargs=dict(config=config, date=date, ens_mem=ens_mem),
                         metadata=payload_metadata,
                     )
@@ -118,7 +120,7 @@ def _get_initial_conditions_source(
 
     if isinstance(config, fluent.Action):
         init_condition = fluent.Payload(
-            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config",
+            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
             args=(fluent.Node.input_name(0),),
             kwargs=dict(date=date),
             metadata=payload_metadata,
@@ -127,7 +129,7 @@ def _get_initial_conditions_source(
         single_init._add_dimension("date", [to_datetime(date)])
     else:
         init_condition = fluent.Payload(
-            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions_from_config",
+            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
             kwargs=dict(config=config, date=date),
             metadata=payload_metadata,
         )
@@ -150,7 +152,7 @@ def _get_initial_conditions_source(
 
 
 def _run_model(
-    expansion_qube: Qube,
+    expansion_qube: dict[str, Qube],
     config: RunConfiguration | dict,
     input_state_source: fluent.Action,
     lead_time: LEAD_TIME,
@@ -162,7 +164,7 @@ def _run_model(
 
     Parameters
     ----------
-    expansion_qube : Qube
+    expansion_qube : dict[str, Qube]
         Expansion qube for the model, can be got from the metadata using `utils.expansion_qube_from_metadata`
     config : RunConfiguration | dict
         Configuration object
@@ -179,18 +181,41 @@ def _run_model(
     Returns
     -------
     fluent.Action
-        Cascade action of the model results
+        Cascade action of the model results,
+        Includes a dataset branch structure, based on the keys of the expansion qube, and the results are expanded along the dimensions of the corresponding qube.
     """
 
     model_payload = fluent.Payload(
-        "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit_from_config",
+        "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit",
         args=(fluent.Node.input_name(0),),
         kwargs=dict(config=config, lead_time=as_timedelta(lead_time), **kwargs),
         metadata=dict(**(payload_metadata or {}), needs_gpu=True),
     )
 
-    model_results = input_state_source.map(model_payload, yields=("step", list(expansion_qube.axes()["step"])))
-    return model_results.expand_as_qube(expansion_qube.remove_by_key("step"))
+    step_dimension = next(iter(expansion_qube.values())).axes()["step"]
+
+    ds_names = expansion_qube.keys()
+    expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
+
+    model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
+
+    dataset_qube = Qube.from_dict({f"dataset={ds}": expansion_qubes_no_step[ds].to_dict() for ds in ds_names})
+    return model_results.expand_as_qube(dataset_qube)
+
+
+def _default_dictionarify(obj: Any | dict[str, T | Any], expected_type: type[T]) -> dict[str, T]:
+    if isinstance(obj, expected_type):
+        return {DEFAULT_DATASET_NAME: obj}
+    elif isinstance(obj, dict):
+        if not any(isinstance(v, expected_type) for v in obj.values()):
+            return {DEFAULT_DATASET_NAME: obj}
+        elif all(isinstance(v, expected_type) for v in obj.values()):
+            return obj
+        else:
+            raise ValueError(
+                f"Invalid dictionary, values must all be of type {expected_type} or none of them must be of type {expected_type}. Got: {obj}"
+            )
+    return obj
 
 
 class Inference:
@@ -202,8 +227,8 @@ class Inference:
         lead_time: LEAD_TIME,
         *,
         environment: ENVIRONMENT | None = None,
-        metadata: Metadata | dict[str, Any] | None = None,
-        expansion_qube: Qube | None = None,
+        metadata: dict[str, Metadata] | None = None,
+        expansion_qube: Qube | dict[str, Qube] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -216,8 +241,8 @@ class Inference:
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         environment : ENVIRONMENT, optional
             Environment to run the model in, by default None
-        metadata : Metadata | dict[str, Any] | None, optional
-            `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+        metadata : dict[str, Metadata] | None, optional
+            `anemoi.inference` multi metadata, if not given will be got from the checkpoint on disk, by default None
         expansion_qube : Qube | None, optional
             Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
         kwargs : dict
@@ -227,8 +252,10 @@ class Inference:
         self.lead_time = lead_time
         self.environment: ENVIRONMENT = environment if environment is not None else []
 
+        self._given_single_qube = isinstance(expansion_qube, Qube)
+
         self.expansion_qube = (
-            expansion_qube
+            _default_dictionarify(expansion_qube, Qube)
             if expansion_qube is not None
             else expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time))
         )
@@ -243,13 +270,13 @@ class Inference:
 
     def _run_model(
         self,
-        config: RunConfiguration | dict,
+        config: dict,
         input_state_source: fluent.Action,
         *,
         payload_metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
-        return _run_model(
+        model_results = _run_model(
             self.expansion_qube,
             config,
             input_state_source,
@@ -257,6 +284,11 @@ class Inference:
             payload_metadata=payload_metadata,
             **kwargs,
         )
+
+        if self._given_single_qube:
+            model_results = model_results.select({"dataset": next(iter(self.expansion_qube.keys()))})
+
+        return model_results
 
     @capture_payload_metadata
     def from_input(
@@ -470,7 +502,7 @@ def from_config(
 
     return _run_model(
         expansion_qube_from_metadata(
-            _get_metadata(configuration.checkpoint),
+            _get_metadata(configuration.checkpoint),  # type: ignore[reportArgumentType]
             as_timedelta(configuration.lead_time),
         ),  # type: ignore
         configuration,
@@ -489,7 +521,8 @@ def from_input(
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
-    metadata: Metadata | None = None,
+    metadata: dict[str, Metadata] | None = None,
+    expansion_qube: Qube | dict[str, Qube] | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -516,8 +549,10 @@ def from_input(
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
-    metadata : Optional[Metadata], optional
+    metadata : Optional[dict[str, Metadata]], optional
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+    expansion_qube : Qube | dict[str, Qube] | None, optional
+        Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -531,7 +566,9 @@ def from_input(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
-    return Inference(ckpt, lead_time, environment=environment, metadata=metadata, **kwargs).from_input(
+    return Inference(
+        ckpt, lead_time, environment=environment, metadata=metadata, expansion_qube=expansion_qube, **kwargs
+    ).from_input(
         input,
         date,
         ensemble_members=ensemble_members,
@@ -546,7 +583,8 @@ def from_initial_conditions(
     *,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
-    metadata: Metadata | None = None,
+    metadata: dict[str, Metadata] | None = None,
+    expansion_qube: Qube | dict[str, Qube] | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -576,8 +614,10 @@ def from_initial_conditions(
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
-    metadata : Optional[Metadata], optional
+    metadata : Optional[dict[str, Metadata]], optional
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+    expansion_qube : Qube | dict[str, Qube] | None, optional
+        Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -591,7 +631,9 @@ def from_initial_conditions(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
-    return Inference(ckpt, lead_time, environment=environment, metadata=metadata, **kwargs).from_initial_conditions(
+    return Inference(
+        ckpt, lead_time, environment=environment, metadata=metadata, expansion_qube=expansion_qube, **kwargs
+    ).from_initial_conditions(
         initial_conditions,
         ensemble_members=ensemble_members,
     )
@@ -840,7 +882,8 @@ def from_dataset(
     input_template: dict[str, Any] | None = None,
     number_of_dataset_tasks: int | None = None,
     environment: ENVIRONMENT | None = None,
-    metadata: Metadata | None = None,
+    metadata: dict[str, Metadata] | None = None,
+    expansion_qube: Qube | dict[str, Qube] | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -876,8 +919,10 @@ def from_dataset(
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference`, `initial_conditions`, and `dataset`
         to set the environment for each part of the run.
-    metadata : Optional[Metadata], optional
+    metadata : Optional[dict[str, Metadata]], optional
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+    expansion_qube : Qube | dict[str, Qube] | None, optional
+        Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -919,8 +964,6 @@ def from_dataset(
     temp_config_file = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False)
     yaml.dump(dataset_config, open(temp_config_file.name, "w"))
 
-    runner_config = dict(checkpoint=ckpt, input="dummy", **kwargs)
-
     environment = crack_environment(environment, ["inference", "dataset", "initial_conditions"])
 
     def construct_configuration(dataset_location: str):
@@ -961,18 +1004,23 @@ def from_dataset(
         fluent.Payload(construct_configuration, args=(fluent.Node.input_name(0),))
     )
 
+    inference = Inference(
+        ckpt,
+        lead_time,
+        environment=environment["inference"],
+        metadata=metadata,
+        expansion_qube=expansion_qube,
+        **kwargs,
+    )
     input_state_source = _get_initial_conditions_source(
         config=init_conditions_config,
         date=date,
         ensemble_members=ensemble_members,
         payload_metadata={"environment": environment["initial_conditions"]},
     )
-    return _run_model(
-        expansion_qube_from_metadata(_get_metadata(ckpt, metadata=metadata), as_timedelta(lead_time)),
-        runner_config,
-        input_state_source,
-        lead_time,
-        payload_metadata={"environment": environment["inference"]},
+    inference.from_initial_conditions(
+        initial_conditions=input_state_source,
+        ensemble_members=ensemble_members,
     )
 
 
@@ -985,7 +1033,8 @@ class Action(fluent.Action):
         lead_time: LEAD_TIME,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
-        metadata: Metadata | None = None,
+        metadata: dict[str, Metadata] | None = None,
+        expansion_qube: Qube | dict[str, Qube] | None = None,
         environment: ENVIRONMENT | None = None,
         **kwargs,
     ) -> fluent.Action:
@@ -1001,8 +1050,10 @@ class Action(fluent.Action):
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
             Number of ensemble members to run, If set to None, the number of ensemble members will be inferred from the action. by default None.
-        metadata : Metadata | None, optional
+        metadata : dict[str, Metadata] | None, optional
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
+        expansion_qube : Qube | dict[str, Qube] | None, optional
+            Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
         environment : Optional[list[str]], optional
             Environment to run the model in, by default None
             If None, will use the current environment
@@ -1024,6 +1075,7 @@ class Action(fluent.Action):
             ensemble_members=ensemble_members,
             environment=environment,
             metadata=metadata,
+            expansion_qube=expansion_qube,
             **kwargs,
         )
 
