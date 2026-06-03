@@ -66,18 +66,18 @@ class TestExposeEnsembleDimension:
     """Tests for expose_ensemble_dimension."""
 
     def test_adds_ensemble_key(self):
-        state = {"date": "2020-01-01"}
+        state = {"data": {"date": "2020-01-01"}}
         result = expose_ensemble_dimension(state, 5)
-        assert result[ENSEMBLE_DIMENSION_NAME] == 5
+        assert result["data"][ENSEMBLE_DIMENSION_NAME] == 5
 
     def test_none_member_no_key(self):
-        state = {"date": "2020-01-01"}
+        state = {"data": {"date": "2020-01-01"}}
         result = expose_ensemble_dimension(state, None)
-        assert ENSEMBLE_DIMENSION_NAME not in result
+        assert ENSEMBLE_DIMENSION_NAME not in result["data"]
 
     def test_mutates_input_dict(self):
         """The function should mutate the dict in place and return it."""
-        state = {"date": "2020-01-01"}
+        state = {"data": {"date": "2020-01-01"}}
         result = expose_ensemble_dimension(state, 1)
         assert result is state
 
@@ -87,12 +87,12 @@ class TestExposeEnsembleDimension:
 
     def test_uses_constant_not_hardcoded(self):
         """Ensure the function uses the ENSEMBLE_DIMENSION_NAME constant."""
-        state = {}
+        state = {"data": {}}
         expose_ensemble_dimension(state, 42)
-        assert ENSEMBLE_DIMENSION_NAME in state
+        assert ENSEMBLE_DIMENSION_NAME in state["data"]
         # If the constant were still 'ensemble_member', this would trivially pass.
         # The important test is that only ENSEMBLE_DIMENSION_NAME is set.
-        assert len([k for k in state if k in ("ensemble_member", "number")]) == 1
+        assert len([k for k in state["data"] if k in ("ensemble_member", "number")]) == 1
 
 
 # --- faked_ensemble_transform ---
@@ -225,8 +225,8 @@ class TestExpansionQubeFromVariables:
         variables_metadata = ckpt._metadata.typed_variables
         model_step = ckpt._metadata.timestep.seconds
 
-        qube = expansion_qube_from_variables(variables, variables_metadata, model_step, "1D")
-        axes = qube.axes()
+        qube_dict = expansion_qube_from_variables({"data": variables}, {"data": variables_metadata}, model_step, "1D")
+        axes = qube_dict["data"].axes()
         assert "step" in axes
         assert "param" in axes
 
@@ -237,16 +237,17 @@ class TestExpansionQubeFromVariables:
 
         ckpt_path = Path(__file__).parent / "checkpoints" / "simple.yaml"
         ckpt = Checkpoint(ckpt_path)
-        metadata = ckpt._metadata
 
         variables = ckpt._metadata.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
         variables_metadata = ckpt._metadata.typed_variables
         model_step = ckpt._metadata.timestep.seconds
 
-        qube_from_vars = expansion_qube_from_variables(variables, variables_metadata, model_step, "1D")
-        qube_from_meta = expansion_qube_from_metadata(metadata, "1D")
+        qube_from_vars = expansion_qube_from_variables(
+            {"data": variables}, {"data": variables_metadata}, model_step, "1D"
+        )
+        qube_from_meta = expansion_qube_from_metadata(ckpt.multi_dataset_metadata, "1D")
 
-        assert qube_from_vars.axes() == qube_from_meta.axes()
+        assert qube_from_vars["data"].axes() == qube_from_meta["data"].axes()
 
 
 # --- expansion_qube_from_metadata with different lead times ---
@@ -260,8 +261,8 @@ class TestExpansionQubeLeadTimes:
         from anemoi.inference.checkpoint import Checkpoint
 
         ckpt_path = Path(__file__).parent / "checkpoints" / "simple.yaml"
-        metadata = Checkpoint(ckpt_path)._metadata
-        qube = expansion_qube_from_metadata(metadata, "2D")
+        qube_dict = expansion_qube_from_metadata(Checkpoint(ckpt_path).multi_dataset_metadata, "2D")
+        qube = next(iter(qube_dict.values()))
         steps = qube.axes()["step"]
         assert max(steps) == 48
 
@@ -271,8 +272,8 @@ class TestExpansionQubeLeadTimes:
         from anemoi.inference.checkpoint import Checkpoint
 
         ckpt_path = Path(__file__).parent / "checkpoints" / "full_atmo.yaml"
-        metadata = Checkpoint(ckpt_path)._metadata
-        qube = expansion_qube_from_metadata(metadata, "1D")
+        qube_dict = expansion_qube_from_metadata(Checkpoint(ckpt_path).multi_dataset_metadata, "1D")
+        qube = next(iter(qube_dict.values()))
         axes = qube.axes()
         assert "level" in axes
         assert "levtype" in axes

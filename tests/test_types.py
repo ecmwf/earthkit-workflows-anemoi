@@ -38,19 +38,19 @@ def test_expose_ensemble_dimension_uses_constant():
     """expose_ensemble_dimension should use ENSEMBLE_DIMENSION_NAME, not a hardcoded key."""
     from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
 
-    state = {"date": "2020-01-01"}
+    state = {"data": {"date": "2020-01-01"}}
     result = expose_ensemble_dimension(state, 3)
-    assert ENSEMBLE_DIMENSION_NAME in result
-    assert result[ENSEMBLE_DIMENSION_NAME] == 3
+    assert ENSEMBLE_DIMENSION_NAME in result["data"]
+    assert result["data"][ENSEMBLE_DIMENSION_NAME] == 3
     # Must NOT use the old hardcoded key
     if ENSEMBLE_DIMENSION_NAME != "ensemble_member":
-        assert "ensemble_member" not in result
+        assert "ensemble_member" not in result["data"]
 
 
 def test_expose_ensemble_dimension_none_member():
-    """When ens_mem is None, no ensemble key should be added."""
+    """When ensemble number is None, no ensemble key should be added."""
     from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
 
-    state = {"date": "2020-01-01"}
+    state = {"data": {"date": "2020-01-01"}}
     result = expose_ensemble_dimension(state, None)
-    assert ENSEMBLE_DIMENSION_NAME not in result
+    assert ENSEMBLE_DIMENSION_NAME not in result["data"]

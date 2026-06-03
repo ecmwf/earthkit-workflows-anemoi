@@ -30,21 +30,33 @@ The ``expansion_qube`` function automatically analyses model metadata
 and creates a hierarchical Qube structure, organising variables by their
 vertical coordinate type.
 
+.. note::
+
+   Since version 0.11.0 of ``anemoi-inference``, models support multiple
+   datasets. The ``expansion_qube_from_metadata`` function now returns a
+   **dictionary of Qubes** (``dict[str, Qube]``), where each key
+   represents a dataset name (e.g., ``"era5"``, ``"cerra"``,
+   ``"data"``).
+
 Basic Usage
 ===========
 
 .. code:: python
 
-   from earthkit.workflows.plugins.anemoi.utils import expansion_qube
+   from earthkit.workflows.plugins.anemoi.utils import expansion_qube_from_metadata
    from anemoi.inference.checkpoint import Checkpoint
 
    # Load model checkpoint
    ckpt = Checkpoint("path/to/checkpoint.ckpt")
 
-   # Create qube for a 5-day forecast
-   qube = expansion_qube(ckpt.metadata, lead_time="5D")
+   # Create qube dictionary for a 5-day forecast
+   qubes = expansion_qube_from_metadata(ckpt.multi_dataset_metadata, lead_time="5D")
 
-   # Inspect the qube structure
+   # qubes is now a dict[str, Qube]
+   print(qubes.keys())  # e.g., dict_keys(['data'])
+
+   # Inspect a specific dataset's qube structure
+   qube = qubes["data"]
    print(qube.axes())
    # Output: {'step': [6, 12, 18, ..., 120],
    #          'param': ['2t', '10u', ...],
@@ -54,9 +66,9 @@ Basic Usage
 What the Qube Represents
 ========================
 
-The returned qube describes how forecast data will be organised when you
-use the anemoi fluent API. The function creates up to three named
-branches:
+The returned dictionary of qubes describes how forecast data will be
+organised when you use the anemoi fluent API. Each dataset in the
+dictionary contains up to three named branches:
 
 #. **surface**: Surface-level 2D fields
 
@@ -80,7 +92,145 @@ step up to the specified lead time.
 
 **Note**: When you use functions like ``from_input`` or
 ``from_initial_conditions``, the expansion is applied automatically
-using this structure.
+using this structure, and a ``dataset`` dimension is added to the
+resulting workflow action.
+
+**************************
+ Multi-Dataset Dimensions
+**************************
+
+When working with models that support multiple datasets (introduced in
+``anemoi-inference`` 0.11.0), the resulting workflow actions include a
+``dataset`` dimension. This dimension allows you to distinguish between
+different datasets in the model output.
+
+Understanding the Dataset Dimension
+===================================
+
+When you create an inference action, the ``dataset`` dimension is
+automatically added based on the keys in the expansion qube dictionary:
+
+.. code:: python
+
+   from earthkit.workflows.plugins.anemoi.fluent import from_input
+
+   # Create an inference action
+   action = from_input(
+       ckpt="path/to/checkpoint.ckpt",
+       input="mars",
+       date="2022-01-01T00:00",
+       lead_time="7D"
+   )
+
+   # The action now has a dataset dimension
+   print(action.nodes.dims)
+   # Output: ('date', 'number', 'step', 'dataset', ...)
+   # Check dataset values
+   print(action.nodes.coords["dataset"].values)
+   # Output: ['era5'] (or multiple dataset names if the model has them)
+
+Selecting a Specific Dataset
+============================
+
+To work with a specific dataset, use the ``.select()`` method:
+
+.. code:: python
+
+   # Select only the 'era5' dataset
+   era5_only = action.select({"dataset": "era5"})
+
+   # Now the dataset dimension is removed
+   print(era5_only.nodes.dims)
+   # Output: ('date', 'number', 'step', ...)
+
+For models with multiple datasets (e.g., ERA5 and CERRA datasets):
+
+.. code:: python
+
+   # If the model has multiple datasets
+   print(action.nodes.coords["dataset"].values)
+   # Output: ['era5', 'cerra']
+
+   # Select only ERA5 data
+   era5_data = action.select({"dataset": "era5"})
+
+   # Select only CERRA data
+   cerra_data = action.select({"dataset": "cerra"})
+
+Single Qube Behaviour
+=====================
+
+When you explicitly provide a **single Qube** (not a dictionary) to the
+``expansion_qube`` parameter, the dataset dimension is automatically
+selected away:
+
+.. code:: python
+
+   from qubed import Qube
+   from earthkit.workflows.plugins.anemoi.fluent import Inference
+
+   # Create a custom single qube
+   qube = Qube.from_datacube({
+       "step": [6, 12, 18, 24],
+       "param": ["2t", "msl"]
+   })
+
+   # Use it in inference
+   inference = Inference(ckpt, lead_time="1D", expansion_qube=qube)
+   action = inference.from_input("mars", date="2022-01-01")
+
+   # The dataset dimension is NOT present
+   print("dataset" in action.nodes.dims)
+   # Output: False
+
+This is for backwards compatibility and convenience when working with
+simple single-dataset models.
+
+Multiple Dataset Example
+========================
+
+For advanced use cases with multiple datasets:
+
+.. code:: python
+
+   from qubed import Qube
+   from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
+
+   # Define separate qubes for different datasets
+   era5_qube = Qube.from_datacube({
+       "step": [6, 12, 18, 24],
+       "param": ["2t", "10u", "10v"],
+       "levtype": ["sfc"]
+   })
+
+   cerra_qube = Qube.from_datacube({
+       "step": [6, 12, 18, 24],
+       "param": ["t", "q", "u", "v"],
+       "level": [500, 850, 1000],
+       "levtype": ["pl"]
+   })
+
+   # Combine into multi-dataset dictionary
+   multi_qube = {
+       "era5": era5_qube,
+       "cerra": cerra_qube
+   }
+
+   # Create inference action
+   action = from_initial_conditions(
+       ckpt="path/to/checkpoint.ckpt",
+       initial_conditions=None,
+       lead_time="1D",
+       expansion_qube=multi_qube
+   )
+
+   # Dataset dimension is present with both keys
+   print(action.nodes.coords["dataset"].values)
+   # Output: ['era5', 'cerra']
+
+   # Select each dataset separately
+   era5 = action.select({"dataset": "era5"})
+   cerra = action.select({"dataset": "cerra"})
 
 ******************
  Inspecting Qubes

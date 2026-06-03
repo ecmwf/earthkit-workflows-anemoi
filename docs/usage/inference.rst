@@ -27,6 +27,13 @@ This will load the checkpoint and use the ``mars`` input source, with a
 lead time of 7 days. It is possible to configure the input source just
 like you would do with the ``anemoi-inference`` interfaces.
 
+.. note::
+
+   The resulting action includes a ``dataset`` dimension for models with
+   multiple datasets (supported since ``anemoi-inference`` 0.11.0). Use
+   ``.select({"dataset": "era5"})`` to select a specific dataset if
+   needed. See :doc:`/usage/expansion` for more details.
+
 *************
  From Source
 *************
