@@ -31,7 +31,7 @@ class TestPayloadMetadataIntegration:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            environment=["anemoi-inference~=0.10"],
+            environment=["anemoi-inference~=0.11"],
         )
         graph = action.graph()
         anemoi_nodes_found = 0

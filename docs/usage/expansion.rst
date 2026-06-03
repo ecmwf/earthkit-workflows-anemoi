@@ -124,8 +124,7 @@ automatically added based on the keys in the expansion qube dictionary:
 
    # The action now has a dataset dimension
    print(action.nodes.dims)
-   # Output: ('date', 'ensemble_member', 'step', 'dataset', ...)
-
+   # Output: ('date', 'number', 'step', 'dataset', ...)
    # Check dataset values
    print(action.nodes.coords["dataset"].values)
    # Output: ['era5'] (or multiple dataset names if the model has them)
@@ -142,8 +141,7 @@ To work with a specific dataset, use the ``.select()`` method:
 
    # Now the dataset dimension is removed
    print(era5_only.nodes.dims)
-   # Output: ('date', 'ensemble_member', 'step', ...)
-
+   # Output: ('date', 'number', 'step', ...)
 For models with multiple datasets (e.g., ERA5 and CERRA datasets):
 
 .. code:: python

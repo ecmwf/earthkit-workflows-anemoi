@@ -41,9 +41,8 @@ def expansion_qube_from_metadata(metadata: "dict[str, Metadata]", lead_time: "LE
     metadata : dict[str, Metadata]
         Model metadata containing variable definitions, including their vertical
         coordinate information (surface, pressure levels, model levels) and the
-        model's time step.
-        Must be a dict of dataset names to Metadata objects or dicts that can be converted to Metadata.
-    lead_time : LEAD_TIME
+        model's time step. The dict keys are dataset names and the values must be
+        `anemoi.inference.metadata.Metadata` instances.
         The forecast lead time as an integer or string (e.g., "7D" for 7 days).
         This determines the number of time steps in the expansion.
         If an integer is provided, it is interpreted as hours.

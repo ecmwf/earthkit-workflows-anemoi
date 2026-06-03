@@ -214,7 +214,7 @@ def _default_dictionarify(obj: Any | dict[str, T | Any], expected_type: type[T])
             raise ValueError(
                 f"Invalid dictionary, values must all be of type {expected_type} or none of them must be of type {expected_type}. Got: {obj}"
             )
-    return obj
+    raise TypeError(f"Invalid type for obj: {type(obj)}. Expected {expected_type} or dict[str, {expected_type}].")
 
 
 class Inference:
@@ -1025,11 +1025,10 @@ def from_dataset(
         ensemble_members=ensemble_members,
         payload_metadata={"environment": environment["initial_conditions"]},
     )
-    inference.from_initial_conditions(
+    return inference.from_initial_conditions(
         initial_conditions=input_state_source,
         ensemble_members=ensemble_members,
     )
-
 
 class Action(fluent.Action):
     """Anemoi Fluent Action"""
