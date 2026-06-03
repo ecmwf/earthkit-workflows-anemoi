@@ -112,7 +112,11 @@ def test_from_config(mock_config, ckpt, ensemble_members, kwargs, shape):
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
 
     action = from_config(
-        mock_config, ensemble_members=ensemble_members, **kwargs, checkpoint=str(ckpt_full_path), input="dummy"
+        mock_config,
+        ensemble_members=ensemble_members,
+        **kwargs,
+        checkpoint=str(ckpt_full_path),
+        input="dummy",
     )
     assert_shape(action, shape)
 
@@ -165,12 +169,16 @@ def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members,
 
     from anemoi.inference.checkpoint import Checkpoint
 
-    metadata = Checkpoint(ckpt_full_path)._metadata  # type: ignore
+    metadata = Checkpoint(ckpt_full_path).multi_dataset_metadata  # type: ignore
 
     kwargs.pop("date", None)
 
     action = from_initial_conditions(
-        "non_existent_checkpoint.ckpt", None, ensemble_members=ensemble_members, metadata=metadata, **kwargs
+        "non_existent_checkpoint.ckpt",
+        None,
+        ensemble_members=ensemble_members,
+        metadata=metadata,
+        **kwargs,
     )
     shape.pop("date", None)
     assert_shape(action, shape)
@@ -302,11 +310,12 @@ def test_inference_from_initial_conditions_propagates_payload_metadata():
 def dict_metadata() -> dict:
     """Build a minimal metadata dict from the simple checkpoint YAML."""
     import yaml
+    from anemoi.inference.metadata import MetadataFactory
 
     parent_dir = Path(__file__).parent
     with open(parent_dir / "checkpoints" / "simple.yaml") as f:
         raw = yaml.safe_load(f)
-    return {
+    raw_dict = {
         "config": {
             "data": raw["config"]["data"],
         },
@@ -316,19 +325,31 @@ def dict_metadata() -> dict:
             "variables_metadata": raw["dataset"]["variables_metadata"],
         },
     }
+    metadata = MetadataFactory(raw_dict)
+    return {"data": metadata}
 
 
 def test_from_initial_conditions_with_dict_metadata(dict_metadata: dict) -> None:
     """Test running from initial conditions with dict metadata (no checkpoint file needed)."""
     action = from_initial_conditions(
-        "non_existent.ckpt", None, metadata=dict_metadata, date="2020-01-01", lead_time="1D"
+        "non_existent.ckpt",
+        None,
+        metadata=dict_metadata,
+        date="2020-01-01",
+        lead_time="1D",
     )
     assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1, "param": 6})
 
 
 def test_from_input_with_dict_metadata(dict_metadata: dict) -> None:
     """Test running from input with dict metadata (no checkpoint file needed)."""
-    action = from_input("non_existent.ckpt", "dummy", metadata=dict_metadata, date="2020-01-01", lead_time="1D")
+    action = from_input(
+        "non_existent.ckpt",
+        "dummy",
+        metadata=dict_metadata,
+        date="2020-01-01",
+        lead_time="1D",
+    )
     assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1, "param": 6, "date": 1})
 
 
@@ -354,8 +375,8 @@ def test_inference_class_with_expansion_qube(dict_metadata: dict) -> None:
         expansion_qube=qube,
     )
     _ = inference.from_initial_conditions(None)
-    # The qube should be used directly without the checkpoint file
-    assert inference.expansion_qube is qube
+    # The qube should be wrapped to {"data": qube}
+    assert inference.expansion_qube["data"] is qube
 
 
 def test_inference_class_with_expansion_qube_no_metadata() -> None:
@@ -366,7 +387,8 @@ def test_inference_class_with_expansion_qube_no_metadata() -> None:
     inference = Inference("non_existent.ckpt", lead_time="1D", expansion_qube=qube)
     # Should not raise even without metadata (qube is used directly)
     _ = inference.from_initial_conditions(None)
-    assert inference.expansion_qube is qube
+    # The qube should be wrapped to {"data": qube}
+    assert inference.expansion_qube["data"] is qube
 
 
 # --- utils: expansion_qube_from_metadata with dict ---
@@ -376,7 +398,8 @@ def test_expansion_qube_from_metadata_with_dict(dict_metadata: dict) -> None:
     """Test expansion_qube_from_metadata accepts dict metadata."""
     from earthkit.workflows.plugins.anemoi.utils import expansion_qube_from_metadata
 
-    qube = expansion_qube_from_metadata(dict_metadata, "1D")
+    qube_dict = expansion_qube_from_metadata(dict_metadata, "1D")
+    qube = qube_dict["data"]
     assert "step" in qube.axes()
     assert "param" in qube.axes()
     assert "levtype" in qube.axes()
@@ -390,8 +413,8 @@ def test_expansion_qube_from_metadata_with_real_metadata() -> None:
     from earthkit.workflows.plugins.anemoi.utils import expansion_qube_from_metadata
 
     ckpt_path = Path(__file__).parent / "checkpoints" / "simple.yaml"
-    metadata = Checkpoint(ckpt_path)._metadata  # type: ignore
-    qube = expansion_qube_from_metadata(metadata, "1D")
+    qube_dict = expansion_qube_from_metadata(Checkpoint(ckpt_path).multi_dataset_metadata, "1D")
+    qube = next(iter(qube_dict.values()))
     assert "step" in qube.axes()
     assert "param" in qube.axes()
     assert "levtype" in qube.axes()

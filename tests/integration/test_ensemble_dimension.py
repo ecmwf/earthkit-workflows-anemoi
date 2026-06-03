@@ -78,7 +78,7 @@ class TestEnsembleDimensionConsistency:
         """Verify the ensemble key in executed states uses the constant name."""
         from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
 
-        state = {"date": "2020-01-01"}
+        state = {"data": {"date": "2020-01-01"}}
         result = expose_ensemble_dimension(state, 5)
-        assert ENSEMBLE_DIMENSION_NAME in result
-        assert result[ENSEMBLE_DIMENSION_NAME] == 5
+        assert ENSEMBLE_DIMENSION_NAME in result["data"]
+        assert result["data"][ENSEMBLE_DIMENSION_NAME] == 5
