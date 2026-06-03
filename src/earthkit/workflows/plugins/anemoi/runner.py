@@ -27,7 +27,6 @@ from anemoi.inference.outputs import output_registry
 from anemoi.inference.outputs.gribmemory import GribMemoryOutput
 from anemoi.inference.runner import Runner
 from anemoi.inference.types import State
-from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.grib import shortname_to_paramid
 
 from .types import ENSEMBLE_DIMENSION_NAME
@@ -85,7 +84,7 @@ class CascadeOutput(Output):
 
         fields = []
 
-        step = frequency_to_seconds(state["date"] - initial_date) // 3600
+        step = state["step"]
 
         for var, array in state["fields"].items():
             variable = self.typed_variables[var]
@@ -95,7 +94,6 @@ class CascadeOutput(Output):
                 {
                     "step": step,
                     "base_datetime": initial_date,
-                    "valid_datetime": state["date"],
                     "paramId": paramId,
                     "shortName": variable.param,
                     "param": variable.param,

@@ -54,7 +54,7 @@ def _get_metadata(ckpt: VALID_CKPT, *, metadata: dict[str, Metadata] | None = No
 
 
 def _get_initial_conditions_source(
-    config: RunConfiguration | dict | fluent.Action,
+    config: dict | fluent.Action | RunConfiguration,
     date: DATE,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
@@ -66,7 +66,7 @@ def _get_initial_conditions_source(
 
     Parameters
     ----------
-    config : RunConfiguration | fluent.Action
+    config : dict | fluent.Action | RunConfiguration
         Configuration object, must contain checkpoint and input.
         If is a fluent action, the action must return the RunConfiguration object.
     date : str | tuple[int, int, int]
@@ -85,12 +85,18 @@ def _get_initial_conditions_source(
     fluent.Action
         Fluent action of the initial conditions
     """
+    # Convert RunConfiguration to dict for payload execution (but keep Action as-is)
+    if hasattr(config, "model_dump") and callable(getattr(config, "model_dump")):
+        config_dict: dict = config.model_dump()  # type: ignore
+    else:
+        config_dict = config
+
     ens_members = parse_ensemble_members(ensemble_members)
     if initial_condition_perturbation:
         if any(ens is None for ens in ens_members):
             raise ValueError("Ensemble members must be specified when using initial condition perturbation.")
-        if isinstance(config, fluent.Action):
-            init_conditions = config.transform(
+        if isinstance(config_dict, fluent.Action):
+            init_conditions = config_dict.transform(
                 lambda x, *a: x.map(
                     fluent.Payload(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
@@ -110,7 +116,7 @@ def _get_initial_conditions_source(
                 [
                     fluent.Payload(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                        kwargs=dict(config=config, date=date, number=ens_mem),
+                        kwargs=dict(config=config_dict, date=date, number=ens_mem),
                         metadata=payload_metadata,
                     )
                     for ens_mem in ens_members
@@ -119,19 +125,19 @@ def _get_initial_conditions_source(
             coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
         )
 
-    if isinstance(config, fluent.Action):
+    if isinstance(config_dict, fluent.Action):
         init_condition = fluent.Payload(
             "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
             args=(fluent.Node.input_name(0),),
             kwargs=dict(date=date),
             metadata=payload_metadata,
         )
-        single_init = config.map(init_condition)
+        single_init = config_dict.map(init_condition)
         single_init._add_dimension("date", [to_datetime(date)])
     else:
         init_condition = fluent.Payload(
             "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-            kwargs=dict(config=config, date=date),
+            kwargs=dict(config=config_dict, date=date),
             metadata=payload_metadata,
         )
         single_init = fluent.from_source(
@@ -185,11 +191,17 @@ def _run_model(
         Cascade action of the model results,
         Includes a dataset branch structure, based on the keys of the expansion qube, and the results are expanded along the dimensions of the corresponding qube.
     """
+    # Convert RunConfiguration to dict for payload execution
+    config_dict = (
+        config.model_dump()  # type: ignore
+        if hasattr(config, "model_dump") and callable(getattr(config, "model_dump"))
+        else config
+    )
 
     model_payload = fluent.Payload(
         "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit",
         args=(fluent.Node.input_name(0),),
-        kwargs=dict(config=config, lead_time=as_timedelta(lead_time), **kwargs),
+        kwargs=dict(config=config_dict, lead_time=as_timedelta(lead_time), **kwargs),
         metadata=dict(**(payload_metadata or {}), needs_gpu=True),
     )
 
@@ -344,7 +356,7 @@ class Inference:
     @capture_payload_metadata
     def from_initial_conditions(
         self,
-        initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
+        initial_conditions: dict[str, State] | None | fluent.Action | fluent.Payload | Callable,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
         **kwargs: Any,
@@ -354,7 +366,7 @@ class Inference:
 
         Parameters
         ----------
-        initial_conditions : State | None | fluent.Action | fluent.Payload | Callable
+        initial_conditions : dict[str, State] | None | fluent.Action | fluent.Payload | Callable
             Initial conditions for the model
             Can be other fluent actions, payloads, a callable, a State, or None.
             None creates a source node that yields None.
@@ -1029,6 +1041,7 @@ def from_dataset(
         initial_conditions=input_state_source,
         ensemble_members=ensemble_members,
     )
+
 
 class Action(fluent.Action):
     """Anemoi Fluent Action"""

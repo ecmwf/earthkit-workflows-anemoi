@@ -89,7 +89,6 @@ def run_as_earthkit(
 
 
 @mark.needs_gpu
-@mark.needs_gpu
 def collect_as_earthkit(input_state: dict, config: dict, lead_time: LEAD_TIME) -> dict[str, ekd.SimpleFieldList]:
     fields: dict[str, list] = {}
     for state in run_as_earthkit(input_state, config, lead_time):
@@ -97,4 +96,3 @@ def collect_as_earthkit(input_state: dict, config: dict, lead_time: LEAD_TIME) -
             fields.setdefault(dataset, []).extend(fieldlist.fields)
 
     return {dataset: ekd.SimpleFieldList(flist) for dataset, flist in fields.items()}
-    return fields

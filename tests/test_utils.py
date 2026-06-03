@@ -225,7 +225,7 @@ class TestExpansionQubeFromVariables:
         variables_metadata = ckpt._metadata.typed_variables
         model_step = ckpt._metadata.timestep.seconds
 
-        qube_dict = expansion_qube_from_variables({"data": variables}, variables_metadata, model_step, "1D")
+        qube_dict = expansion_qube_from_variables({"data": variables}, {"data": variables_metadata}, model_step, "1D")
         axes = qube_dict["data"].axes()
         assert "step" in axes
         assert "param" in axes
@@ -242,7 +242,9 @@ class TestExpansionQubeFromVariables:
         variables_metadata = ckpt._metadata.typed_variables
         model_step = ckpt._metadata.timestep.seconds
 
-        qube_from_vars = expansion_qube_from_variables({"data": variables}, variables_metadata, model_step, "1D")
+        qube_from_vars = expansion_qube_from_variables(
+            {"data": variables}, {"data": variables_metadata}, model_step, "1D"
+        )
         qube_from_meta = expansion_qube_from_metadata(ckpt.multi_dataset_metadata, "1D")
 
         assert qube_from_vars["data"].axes() == qube_from_meta["data"].axes()

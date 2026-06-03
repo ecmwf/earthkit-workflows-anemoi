@@ -46,6 +46,9 @@ def expansion_qube_from_metadata(metadata: "dict[str, Metadata]", lead_time: "LE
         The forecast lead time as an integer or string (e.g., "7D" for 7 days).
         This determines the number of time steps in the expansion.
         If an integer is provided, it is interpreted as hours.
+    lead_time : LEAD_TIME
+        The forecast lead time as an integer or string (e.g., "7D" for 7 days). This determines the number of time steps in the expansion.
+        If an integer is provided, it is interpreted as hours.
 
     Returns
     -------
@@ -98,7 +101,7 @@ def expansion_qube_from_metadata(metadata: "dict[str, Metadata]", lead_time: "LE
 
 def expansion_qube_from_variables(
     variables: dict[str, list[str]],
-    variables_metadata: dict[str, dict],
+    variables_metadata: dict[str, dict[str, dict]],
     model_step: int,
     lead_time: "LEAD_TIME",
 ) -> dict[str, Qube]:
@@ -114,10 +117,11 @@ def expansion_qube_from_variables(
     variables : dict[str, list[str]]
         A dictionary mapping dataset names to lists of variable names to include in the qube. These should correspond to keys in the
         variables_metadata dictionary.
-    variables_metadata : dict[str, dict]
+    variables_metadata : dict[str, dict[str, dict]]
         A dictionary mapping variable names to their metadata objects. Each metadata object should
         contain information about whether the variable is a surface level, pressure level, or model level variable,
         as well as its parameter and level information.
+        Structure: {dataset_name: {variable_name: variable_metadata}}
     model_step : int
         The model's time step in seconds. This is used to calculate the time steps for expansion.
     lead_time : LEAD_TIME
@@ -161,7 +165,8 @@ def expansion_qube_from_variables(
     expansion_qube_from_metadata : Create a Qube object directly from model metadata.
     """
     return {
-        dataset: _expansion_qube(vars, variables_metadata, model_step, lead_time) for dataset, vars in variables.items()
+        dataset: _expansion_qube(vars, variables_metadata[dataset], model_step, lead_time)
+        for dataset, vars in variables.items()
     }
 
 

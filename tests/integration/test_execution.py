@@ -56,9 +56,15 @@ class TestExecution:
 
     @fake_checkpoints
     def test_ic_mock_returns_valid_state(self, simple_ckpt_path, mock_registry):
-        """The mocked IC function should return a dict with required keys."""
+        """The mocked IC function should return dict[str, State] (multi-dataset API)."""
         ic_func = mock_registry["earthkit.workflows.plugins.anemoi.inference._get_initial_conditions"]
-        state = ic_func(config={}, date="2020-01-01")
+        state_dict = ic_func(config={}, date="2020-01-01")
+
+        # New API returns dict[str, State]
+        assert isinstance(state_dict, dict)
+        assert "era5" in state_dict  # default dataset name in mock
+
+        state = state_dict["era5"]
         assert isinstance(state, dict)
         assert "date" in state
         assert "fields" in state
@@ -66,19 +72,27 @@ class TestExecution:
         assert "longitudes" in state
         assert ENSEMBLE_DIMENSION_NAME not in state  # deterministic
 
-        state_ens = ic_func(config={}, date="2020-01-01", number=3)
+        state_dict_ens = ic_func(config={}, date="2020-01-01", number=3)
+        state_ens = state_dict_ens["era5"]
         assert ENSEMBLE_DIMENSION_NAME in state_ens
         assert state_ens[ENSEMBLE_DIMENSION_NAME] == 3
 
     @fake_checkpoints
     def test_run_mock_yields_fieldlists(self, simple_ckpt_path, mock_registry):
-        """The mocked run function should yield fieldlist-like objects."""
+        """The mocked run function should yield dict[str, SimpleFieldList] per step."""
         ic_func = mock_registry["earthkit.workflows.plugins.anemoi.inference._get_initial_conditions"]
         run_func = mock_registry["earthkit.workflows.plugins.anemoi.inference.run_as_earthkit"]
 
-        state = ic_func(config={}, date="2020-01-01")
-        results = list(run_func(state, config={}, lead_time=datetime.timedelta(days=1)))
+        state_dict = ic_func(config={}, date="2020-01-01")
+        results = list(run_func(state_dict, config={}, lead_time=datetime.timedelta(days=1)))
+
         assert len(results) == 4  # 4 x 6h steps in 1D
-        for r in results:
-            assert hasattr(r, "fields")
-            assert len(r.fields) > 0
+
+        for step_result in results:
+            # New API yields dict[str, SimpleFieldList]
+            assert isinstance(step_result, dict)
+            assert "era5" in step_result  # default dataset name in mock
+
+            fieldlist = step_result["era5"]
+            assert hasattr(fieldlist, "fields")
+            assert len(fieldlist.fields) > 0

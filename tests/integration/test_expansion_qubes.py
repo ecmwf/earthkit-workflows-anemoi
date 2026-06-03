@@ -116,7 +116,7 @@ class TestExpansionQubeReturnType:
             for ds, m in md.items()
         }
 
-        variables_metadata = next(iter(md.values())).typed_variables
+        variables_metadata = {ds: m.typed_variables for ds, m in md.items()}
         model_step = next(iter(md.values())).timestep.seconds
 
         qubes = expansion_qube_from_variables(variables, variables_metadata, model_step, "1D")
@@ -141,7 +141,7 @@ class TestExpansionQubeReturnType:
             ds: m.select_variables(include=["diagnostic", "prognostic"], has_mars_requests=False)
             for ds, m in md.items()
         }
-        variables_metadata = next(iter(md.values())).typed_variables
+        variables_metadata = {ds: m.typed_variables for ds, m in md.items()}
         model_step = next(iter(md.values())).timestep.seconds
         qubes_from_vars = expansion_qube_from_variables(variables, variables_metadata, model_step, "1D")
 

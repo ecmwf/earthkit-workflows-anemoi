@@ -142,6 +142,7 @@ To work with a specific dataset, use the ``.select()`` method:
    # Now the dataset dimension is removed
    print(era5_only.nodes.dims)
    # Output: ('date', 'number', 'step', ...)
+
 For models with multiple datasets (e.g., ERA5 and CERRA datasets):
 
 .. code:: python

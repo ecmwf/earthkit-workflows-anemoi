@@ -136,7 +136,10 @@ def _make_fake_state(date: datetime.datetime, step_hours: int = 6) -> dict:
 
 
 def mock_get_initial_conditions(config, date, number=None, **kwargs):
-    """Mock replacement for _get_initial_conditions."""
+    """Mock replacement for _get_initial_conditions.
+
+    Returns dict[str, State] to match the real multi-dataset API.
+    """
     from earthkit.data.utils.dates import to_datetime
 
     from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
@@ -156,13 +159,15 @@ def mock_get_initial_conditions(config, date, number=None, **kwargs):
     }
     if number is not None:
         state[ENSEMBLE_DIMENSION_NAME] = number
-    return state
+
+    # Return dict[str, State] for multi-dataset support
+    return {"era5": state}
 
 
 def mock_run_as_earthkit(input_state, config, lead_time, **kwargs):
     """Mock replacement for run_as_earthkit.
 
-    Yields one fake fieldlist per 6h step up to lead_time.
+    Yields dict[str, SimpleFieldList] per step to match the real multi-dataset API.
     """
     from anemoi.utils.dates import frequency_to_seconds
 
@@ -170,11 +175,21 @@ def mock_run_as_earthkit(input_state, config, lead_time, **kwargs):
 
     lead_time_seconds = frequency_to_seconds(lead_time)
     model_step = 6 * 3600  # 6h steps
-    ensemble_member = input_state.get(ENSEMBLE_DIMENSION_NAME, None)
+
+    # Handle both single state and dict-of-states input
+    if isinstance(input_state, dict) and "fields" in input_state:
+        # Old-style single state (backward compat)
+        ensemble_member = input_state.get(ENSEMBLE_DIMENSION_NAME, None)
+    elif isinstance(input_state, dict):
+        # New dict-of-datasets style - get ensemble from first dataset
+        ensemble_member = next(iter(input_state.values())).get(ENSEMBLE_DIMENSION_NAME, None)
+    else:
+        ensemble_member = None
 
     for step_seconds in range(model_step, lead_time_seconds + model_step, model_step):
         step_hours = step_seconds // 3600
-        yield _make_fake_fieldlist(step_hours, ensemble_member)
+        # Yield dict[str, SimpleFieldList] for multi-dataset support
+        yield {"era5": _make_fake_fieldlist(step_hours, ensemble_member)}
 
 
 # ---------------------------------------------------------------------------
