@@ -135,7 +135,7 @@ def _make_fake_state(date: datetime.datetime, step_hours: int = 6) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def mock_get_initial_conditions(config, date, ens_mem=None, **kwargs):
+def mock_get_initial_conditions(config, date, number=None, **kwargs):
     """Mock replacement for _get_initial_conditions."""
     from earthkit.data.utils.dates import to_datetime
 
@@ -154,8 +154,8 @@ def mock_get_initial_conditions(config, date, ens_mem=None, **kwargs):
             "tp": np.random.randn(100),
         },
     }
-    if ens_mem is not None:
-        state[ENSEMBLE_DIMENSION_NAME] = ens_mem
+    if number is not None:
+        state[ENSEMBLE_DIMENSION_NAME] = number
     return state
 
 

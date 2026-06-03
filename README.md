@@ -77,6 +77,8 @@ model_action
 
 ```
 
+**Note:** For models with multiple datasets (supported since `anemoi-inference` 0.11.0), the resulting action includes a `dataset` dimension. Use `.select({"dataset": "era5"})` to select a specific dataset if needed.
+
 Given other nodes as the initial conditions:
 
 ```python

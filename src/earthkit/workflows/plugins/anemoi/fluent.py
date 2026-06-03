@@ -108,7 +108,6 @@ def _get_initial_conditions_source(
         return fluent.from_source(
             [
                 [
-                    # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
                     fluent.Payload(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
                         kwargs=dict(config=config, date=date, number=ens_mem),
@@ -565,7 +564,12 @@ def from_input(
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
     return Inference(
-        ckpt, lead_time, environment=environment, metadata=metadata, expansion_qube=expansion_qube, **kwargs
+        ckpt,
+        lead_time,
+        environment=environment,
+        metadata=metadata,
+        expansion_qube=expansion_qube,
+        **kwargs,
     ).from_input(
         input,
         date,
@@ -630,7 +634,12 @@ def from_initial_conditions(
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
     return Inference(
-        ckpt, lead_time, environment=environment, metadata=metadata, expansion_qube=expansion_qube, **kwargs
+        ckpt,
+        lead_time,
+        environment=environment,
+        metadata=metadata,
+        expansion_qube=expansion_qube,
+        **kwargs,
     ).from_initial_conditions(
         initial_conditions,
         ensemble_members=ensemble_members,

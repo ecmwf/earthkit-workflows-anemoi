@@ -48,7 +48,7 @@ def test_expose_ensemble_dimension_uses_constant():
 
 
 def test_expose_ensemble_dimension_none_member():
-    """When ens_mem is None, no ensemble key should be added."""
+    """When ensemble number is None, no ensemble key should be added."""
     from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
 
     state = {"data": {"date": "2020-01-01"}}

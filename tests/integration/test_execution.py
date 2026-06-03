@@ -66,7 +66,7 @@ class TestExecution:
         assert "longitudes" in state
         assert ENSEMBLE_DIMENSION_NAME not in state  # deterministic
 
-        state_ens = ic_func(config={}, date="2020-01-01", ens_mem=3)
+        state_ens = ic_func(config={}, date="2020-01-01", number=3)
         assert ENSEMBLE_DIMENSION_NAME in state_ens
         assert state_ens[ENSEMBLE_DIMENSION_NAME] == 3
 
