@@ -251,7 +251,9 @@ def parse_ensemble_members(
 def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
     assert isinstance(x, dict), "Input state must be a dictionary"
     if ens_mem is not None:
-        x[ENSEMBLE_DIMENSION_NAME] = ens_mem
+        for key, value in x.items():
+            if isinstance(value, dict):
+                x[key][ENSEMBLE_DIMENSION_NAME] = ens_mem
     return x
 
 

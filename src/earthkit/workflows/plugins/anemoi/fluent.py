@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from functools import reduce
+from operator import or_
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from anemoi.utils.dates import as_timedelta
@@ -93,7 +95,7 @@ def _get_initial_conditions_source(
                     fluent.Payload(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
                         args=(fluent.Node.input_name(0)),
-                        kwargs=dict(ens_num=a[0], date=date),
+                        kwargs=dict(number=a[0], date=date),
                         metadata=payload_metadata,
                     )
                 ),
@@ -109,7 +111,7 @@ def _get_initial_conditions_source(
                     # fluent.Payload(_get_initial_conditions_ens, kwargs=dict(input=input, date=date, ens_mem=ens_mem))
                     fluent.Payload(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                        kwargs=dict(config=config, date=date, ens_mem=ens_mem),
+                        kwargs=dict(config=config, date=date, number=ens_mem),
                         metadata=payload_metadata,
                     )
                     for ens_mem in ens_members
@@ -193,13 +195,11 @@ def _run_model(
     )
 
     step_dimension = next(iter(expansion_qube.values())).axes()["step"]
-
-    ds_names = expansion_qube.keys()
     expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
 
     model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
 
-    dataset_qube = Qube.from_dict({f"dataset={ds}": expansion_qubes_no_step[ds].to_dict() for ds in ds_names})
+    dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
     return model_results.expand_as_qube(dataset_qube)
 
 
@@ -284,10 +284,8 @@ class Inference:
             payload_metadata=payload_metadata,
             **kwargs,
         )
-
         if self._given_single_qube:
             model_results = model_results.select({"dataset": next(iter(self.expansion_qube.keys()))})
-
         return model_results
 
     @capture_payload_metadata

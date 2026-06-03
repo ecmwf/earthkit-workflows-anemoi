@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import earthkit.data as ekd
 from anemoi.inference.types import State
@@ -28,23 +28,34 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
-def _get_initial_conditions(config: dict, date: DATE, ens_mem: int | None = None) -> dict[str, State]:
+def _get_initial_conditions(config: dict, date: DATE, number: int | None = None) -> dict[str, State]:
     """Get initial conditions for the model"""
     runner = CascadeRunner(**config)
 
     states = {}
     from anemoi.inference.inputs.mars import MarsInput
 
-    for key, input in runner.prognostics_inputs.items():
-        if isinstance(input, MarsInput):
-            input.kwargs["number"] = ens_mem
+    # TODO: Replace with a prefetch of all data in the case of dynamics and model uses GribInput during run
+    # Use pipes to read and write
+    def _mars_kwargs(input_obj):
+        if isinstance(input_obj, MarsInput) and number is not None:
+            return {"number": number}
+        return {}
 
-        states[key] = input.create_input_state(date=to_datetime(date))
-        if ens_mem is not None:
-            states[key][ENSEMBLE_DIMENSION_NAME] = ens_mem
-
+    for key in runner.dataset_names:
+        dt = to_datetime(date)
+        states[key] = runner._combine_states(
+            runner.prognostics_inputs[key].create_input_state(date=dt, **_mars_kwargs(runner.prognostics_inputs[key])),
+            runner.constant_forcings_inputs[key].create_input_state(
+                date=dt, **_mars_kwargs(runner.constant_forcings_inputs[key])
+            ),
+            runner.dynamic_forcings_inputs[key].create_input_state(
+                date=dt, **_mars_kwargs(runner.dynamic_forcings_inputs[key])
+            ),
+        )
+        if number is not None:
+            states[key][ENSEMBLE_DIMENSION_NAME] = number
         states[key].pop("_grib_templates_for_output", None)
-
     return states
 
 
@@ -53,7 +64,6 @@ def run_as_earthkit(
     input_states: dict,
     config: dict,
     lead_time: LEAD_TIME,
-    extra_metadata: dict[str, Any] | None = None,
 ) -> Generator[dict[str, ekd.SimpleFieldList]]:
     """
     Run the model and yield the results as earthkit FieldList
@@ -66,8 +76,6 @@ def run_as_earthkit(
         Configuration for the model run
     lead_time : LEAD_TIME
         Lead time for the model
-    extra_metadata: dict[str, Any], optional
-        Extra metadata to add to the fields, by default None
 
     Returns
     -------
@@ -76,25 +84,14 @@ def run_as_earthkit(
     """
     runner = CascadeRunner(**config)
 
-    extra_metadata = extra_metadata or {}
-
-    for states in runner.run(input_states=input_states, lead_time=lead_time):
-        # Run post-processors for each dataset
-        output_states = {}
-        for dataset, state in states.items():
-            for processor in runner.post_processors[dataset]:
-                state = processor.process(state)
-            output_states[dataset] = runner.outputs[dataset].write_step(state)
-        yield output_states
+    yield from runner.run(input_states=input_states, lead_time=lead_time)
     del runner.model
 
 
 @mark.needs_gpu
-def collect_as_earthkit(
-    input_state: dict, config: dict, lead_time: LEAD_TIME, extra_metadata: dict[str, Any] | None = None
-) -> dict[str, ekd.SimpleFieldList]:
+def collect_as_earthkit(input_state: dict, config: dict, lead_time: LEAD_TIME) -> dict[str, ekd.SimpleFieldList]:
     fields: dict[str, ekd.SimpleFieldList] = {}
-    for state in run_as_earthkit(input_state, config, lead_time, extra_metadata):
+    for state in run_as_earthkit(input_state, config, lead_time):
         for dataset, fieldlist in state.items():
             if dataset not in fields:
                 fields[dataset] = ekd.SimpleFieldList([])
