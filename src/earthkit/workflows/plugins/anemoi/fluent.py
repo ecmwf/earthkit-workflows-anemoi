@@ -153,8 +153,6 @@ def _get_initial_conditions_source(
         list(zip(ens_members)),
         (ENSEMBLE_DIMENSION_NAME, ens_members),  # type: ignore
     )
-    if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
-        expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
     return expanded_init
 
 
@@ -404,29 +402,9 @@ class Inference:
                 dims=["date"],
             )  # type: ignore
 
-        if ENSEMBLE_DIMENSION_NAME in initial_conditions_source.nodes.dims:
-            if ensemble_members is None:
-                ensemble_members = len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME])
-
-            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
-
-            if len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME]) != len(parsed_ensemble_members):
-                raise ValueError(
-                    "Number of ensemble members in initial conditions must match `ensemble_members` argument"
-                )
-            ens_initial_conditions = initial_conditions_source
-
-        else:
-            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
-            ens_initial_conditions = initial_conditions_source.transform(
-                faked_ensemble_transform,
-                list(zip(parsed_ensemble_members)),  # type: ignore
-                (ENSEMBLE_DIMENSION_NAME, parsed_ensemble_members),  # type: ignore
-            )
-
         return self._run_model(
             config,
-            ens_initial_conditions,
+            initial_conditions_source,
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
