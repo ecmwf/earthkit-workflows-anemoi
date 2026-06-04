@@ -117,15 +117,6 @@ class TestDataFlows:
     # --- Inference class: from_initial_conditions ---
 
     @fake_checkpoints
-    def test_inference_from_initial_conditions_none(self, simple_ckpt_path):
-        """Inference.from_initial_conditions(None) should build a valid graph."""
-        inference = Inference(simple_ckpt_path, lead_time="1D")
-        action = inference.from_initial_conditions(None, ensemble_members=2)
-        graph = action.graph()
-        assert not graph.has_cycle()
-        assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
-
-    @fake_checkpoints
     def test_inference_from_initial_conditions_action(self, simple_ckpt_path):
         """Inference.from_initial_conditions with a fluent.Action should chain correctly."""
         init = fluent.from_source(

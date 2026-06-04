@@ -40,7 +40,12 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     def _mars_kwargs(input_obj):
         if isinstance(input_obj, MarsInput) and number is not None:
             return {"number": number}
-        return {}
+        elif number is not None:
+            raise ValueError(
+                f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
+            )
+        else:
+            return {}
 
     for key in runner.dataset_names:
         dt = to_datetime(date)

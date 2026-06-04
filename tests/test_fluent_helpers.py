@@ -14,24 +14,26 @@ from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 
 @pytest.mark.parametrize(
-    "date, ensemble_members, perturbation, shape",
+    "date, ensemble_members, shape",
     [
-        ["2000-01-01", 1, False, {"date": 1}],
-        ["2000-01-01", [2], False, {"date": 1}],
-        ["2000-01-01", range(1, 2), False, {"date": 1}],
-        ["2000-01-01", 10, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", range(10), False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", range(10, 20), False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", 10, True, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", 51, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        ["2000-01-01", 51, True, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        [-1, 51, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        ["2000-01-01", 1, {"date": 1}],
+        ["2000-01-01", [2], {"date": 1}],
+        ["2000-01-01", range(1, 2), {"date": 1}],
+        ["2000-01-01", 10, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", range(10), {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", range(10, 20), {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", 10, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        ["2000-01-01", 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        [-1, 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
     ],
 )
-def test_get_initial_conditions_action(mock_config, date, ensemble_members, perturbation, shape):
+def test_get_initial_conditions_action(mock_config, date, ensemble_members, shape):
     """Test getting initial conditions"""
     action = _get_initial_conditions_source(
-        mock_config, date, ensemble_members, initial_condition_perturbation=perturbation
+        mock_config,
+        date,
+        ensemble_members,
     )
 
     for dim in shape:
@@ -40,15 +42,13 @@ def test_get_initial_conditions_action(mock_config, date, ensemble_members, pert
 
 
 @pytest.mark.parametrize(
-    "date, ensemble_members, perturbation, shape",
+    "date, ensemble_members, shape",
     [
-        ["2000-01-01", 0, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", -1, False, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", 0, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", -1, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
     ],
 )
-def test_get_initial_conditions_action_fail(mock_config, date, ensemble_members, perturbation, shape):
+def test_get_initial_conditions_action_fail(mock_config, date, ensemble_members, shape):
     """Test failing to get initial conditions"""
     with pytest.raises(ValueError):
-        _ = _get_initial_conditions_source(
-            mock_config, date, ensemble_members, initial_condition_perturbation=perturbation
-        )
+        _ = _get_initial_conditions_source(mock_config, date, ensemble_members)
