@@ -28,7 +28,7 @@ from qubed import Qube
 from earthkit.workflows import fluent
 
 from .types import ENSEMBLE_DIMENSION_NAME
-from .utils import crack_environment, expansion_qube_from_metadata, faked_ensemble_transform, parse_ensemble_members
+from .utils import crack_environment, expansion_qube_from_metadata, parse_ensemble_members
 
 if TYPE_CHECKING:
     # anemoi-inference imports
@@ -58,7 +58,6 @@ def _get_initial_conditions_source(
     date: DATE,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
-    initial_condition_perturbation: bool = False,
     payload_metadata: dict[str, Any] | None = None,
 ) -> fluent.Action:
     """
@@ -73,10 +72,6 @@ def _get_initial_conditions_source(
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to get, by default None
-    initial_condition_perturbation : bool, optional
-        Whether to get perturbed initial conditions, by default False
-        If False, only one initial condition is returned, and
-        the ensemble members are simulated by wrapping the action.
     payload_metadata : Optional[dict[str, Any]], optional
         Metadata to add to the payload, by default None
 
@@ -91,71 +86,42 @@ def _get_initial_conditions_source(
     else:
         config_dict = config
 
+    if ensemble_members is None:
+        ensemble_members = [0]
+
     ens_members = parse_ensemble_members(ensemble_members)
-    if initial_condition_perturbation:
-        if any(ens is None for ens in ens_members):
-            raise ValueError("Ensemble members must be specified when using initial condition perturbation.")
-        if isinstance(config_dict, fluent.Action):
-            init_conditions = config_dict.transform(
-                lambda x, *a: x.map(
-                    fluent.Payload(
-                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                        args=(fluent.Node.input_name(0)),
-                        kwargs=dict(number=a[0], date=date),
-                        metadata=payload_metadata,
-                    )
-                ),
-                params=ens_members,
-                dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
-            )
-            init_conditions._add_dimension("date", [to_datetime(date)])
-            return init_conditions
 
-        return fluent.from_source(
-            [
-                [
-                    fluent.Payload(
-                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                        kwargs=dict(config=config_dict, date=date, number=ens_mem),
-                        metadata=payload_metadata,
-                    )
-                    for ens_mem in ens_members
-                ],
-            ],  # type: ignore
-            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
-        )
-
+    if any(ens is None for ens in ens_members):
+        raise ValueError("Ensemble members must be specified when using initial condition perturbation.")
     if isinstance(config_dict, fluent.Action):
-        init_condition = fluent.Payload(
-            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-            args=(fluent.Node.input_name(0),),
-            kwargs=dict(date=date),
-            metadata=payload_metadata,
+        init_conditions = config_dict.transform(
+            lambda x, *a: x.map(
+                fluent.Payload(
+                    "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                    args=(fluent.Node.input_name(0)),
+                    kwargs=dict(number=a[0], date=date),
+                    metadata=payload_metadata,
+                )
+            ),
+            params=ens_members,
+            dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
         )
-        single_init = config_dict.map(init_condition)
-        single_init._add_dimension("date", [to_datetime(date)])
-    else:
-        init_condition = fluent.Payload(
-            "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-            kwargs=dict(config=config_dict, date=date),
-            metadata=payload_metadata,
-        )
-        single_init = fluent.from_source(
-            [
-                init_condition,
-            ],  # type: ignore
-            coords={"date": [to_datetime(date)]},
-        )
+        init_conditions._add_dimension("date", [to_datetime(date)])
+        return init_conditions
 
-    # Wrap with empty payload to simulate ensemble members
-    expanded_init = single_init.transform(
-        faked_ensemble_transform,
-        list(zip(ens_members)),
-        (ENSEMBLE_DIMENSION_NAME, ens_members),  # type: ignore
+    return fluent.from_source(
+        [
+            [
+                fluent.Payload(
+                    "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                    kwargs=dict(config=config_dict, date=date, number=ens_mem),
+                    metadata=payload_metadata,
+                )
+                for ens_mem in ens_members
+            ],
+        ],  # type: ignore
+        coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
     )
-    if ENSEMBLE_DIMENSION_NAME not in expanded_init.nodes.coords:
-        expanded_init.nodes = expanded_init.nodes.expand_dims(ENSEMBLE_DIMENSION_NAME)
-    return expanded_init
 
 
 def _run_model(
@@ -357,8 +323,6 @@ class Inference:
     def from_initial_conditions(
         self,
         initial_conditions: dict[str, State] | None | fluent.Action | fluent.Payload | Callable,
-        *,
-        ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -372,11 +336,6 @@ class Inference:
             None creates a source node that yields None.
             If a fluent action and multiple ensemble member initial conditions
             are included, the dimension must be named `ensemble_member`.
-        ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
-            Number of ensemble members to run.
-            If initial_conditions is a fluent action with multiple ensemble
-            members, this argument can be set to None, and the number of
-            ensemble members will be inferred from the action.
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -404,29 +363,9 @@ class Inference:
                 dims=["date"],
             )  # type: ignore
 
-        if ENSEMBLE_DIMENSION_NAME in initial_conditions_source.nodes.dims:
-            if ensemble_members is None:
-                ensemble_members = len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME])
-
-            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
-
-            if len(initial_conditions_source.nodes.coords[ENSEMBLE_DIMENSION_NAME]) != len(parsed_ensemble_members):
-                raise ValueError(
-                    "Number of ensemble members in initial conditions must match `ensemble_members` argument"
-                )
-            ens_initial_conditions = initial_conditions_source
-
-        else:
-            parsed_ensemble_members = parse_ensemble_members(ensemble_members)
-            ens_initial_conditions = initial_conditions_source.transform(
-                faked_ensemble_transform,
-                list(zip(parsed_ensemble_members)),  # type: ignore
-                (ENSEMBLE_DIMENSION_NAME, parsed_ensemble_members),  # type: ignore
-            )
-
         return self._run_model(
             config,
-            ens_initial_conditions,
+            initial_conditions_source,
             payload_metadata={"environment": environment_dict["inference"]},
         )
 
@@ -663,6 +602,7 @@ def get_initial_conditions(
     ckpt: VALID_CKPT,
     input: str | dict[str, Any],
     date: DATE,
+    ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
     environment: ENVIRONMENT | None = None,
     **kwargs: Any,
@@ -696,6 +636,10 @@ def get_initial_conditions(
         Date for the initial conditions. Can be a ``datetime.datetime``,
         an ISO 8601 string (e.g. ``"2021-01-01T00:00:00"``), or a
         ``(year, month, day)`` tuple.
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
+        Number of ensemble members to retrieve, or specification of which members to retrieve.
+        This can be set to None to retrieve a single member, or to a specification (e.g. an int for number of members, or a list of member identifiers) to retrieve multiple members.
+        By default, None (retrieves a single member if supported).
     environment : ENVIRONMENT, optional
         Environment to run the initial conditions retrieval in, by default None.
         If None, will use the current environment.
@@ -741,6 +685,7 @@ def get_initial_conditions(
     return _get_initial_conditions_source(
         config=config,
         date=date,
+        ensemble_members=ensemble_members,
         payload_metadata={"environment": environment_dict["initial_conditions"]},
     )
 

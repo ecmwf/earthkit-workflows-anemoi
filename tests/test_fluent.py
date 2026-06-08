@@ -131,10 +131,10 @@ def test_from_initial_conditions_from_none(ckpt, ensemble_members, kwargs, shape
     ckpt_full_path = (Path(__file__).parent / f"checkpoints/{ckpt}.yaml").absolute()
     kwargs = kwargs.copy()
     shape = shape.copy()
-    kwargs.pop("date", None)
 
-    action = from_initial_conditions(ckpt_full_path, None, ensemble_members=ensemble_members, **kwargs)
+    action = from_initial_conditions(ckpt_full_path, None, **kwargs)
     shape.pop("date", None)
+    shape.pop(ENSEMBLE_DIMENSION_NAME, None)
     assert_shape(action, shape)
 
 
@@ -151,8 +151,9 @@ def test_inference_from_initial_conditions_from_none(ckpt, ensemble_members, kwa
     kwargs.pop("date", None)
 
     inference = Inference(ckpt_full_path, lead_time=kwargs.pop("lead_time"))
-    action = inference.from_initial_conditions(None, ensemble_members=ensemble_members, **kwargs)
+    action = inference.from_initial_conditions(None, **kwargs)
     shape.pop("date", None)
+    shape.pop(ENSEMBLE_DIMENSION_NAME, None)
     assert_shape(action, shape)
 
 
@@ -176,11 +177,11 @@ def test_from_initial_conditions_with_no_checkpoint_file(ckpt, ensemble_members,
     action = from_initial_conditions(
         "non_existent_checkpoint.ckpt",
         None,
-        ensemble_members=ensemble_members,
         metadata=metadata,
         **kwargs,
     )
     shape.pop("date", None)
+    shape.pop(ENSEMBLE_DIMENSION_NAME, None)
     assert_shape(action, shape)
 
 
@@ -338,7 +339,7 @@ def test_from_initial_conditions_with_dict_metadata(dict_metadata: dict) -> None
         date="2020-01-01",
         lead_time="1D",
     )
-    assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1, "param": 6})
+    assert_shape(action, {"step": 4, "param": 6})
 
 
 def test_from_input_with_dict_metadata(dict_metadata: dict) -> None:
@@ -349,6 +350,7 @@ def test_from_input_with_dict_metadata(dict_metadata: dict) -> None:
         metadata=dict_metadata,
         date="2020-01-01",
         lead_time="1D",
+        ensemble_members=1,
     )
     assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1, "param": 6, "date": 1})
 
@@ -360,7 +362,7 @@ def test_inference_class_with_dict_metadata(dict_metadata: dict) -> None:
     inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"], metadata=dict_metadata)
     action = inference.from_initial_conditions(None, payload_metadata=PAYLOAD_METADATA)
     assert_payload_metadata(action, PAYLOAD_METADATA)
-    assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1})
+    assert_shape(action, {"step": 4})
 
 
 def test_inference_class_with_expansion_qube(dict_metadata: dict) -> None:
