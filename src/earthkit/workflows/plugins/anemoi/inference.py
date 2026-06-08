@@ -33,6 +33,7 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     runner = CascadeRunner(**config)
 
     states = {}
+    from anemoi.inference.inputs.empty import EmptyInput
     from anemoi.inference.inputs.mars import MarsInput
 
     # TODO: Replace with a prefetch of all data in the case of dynamics and model uses GribInput during run
@@ -40,6 +41,8 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     def _mars_kwargs(input_obj):
         if isinstance(input_obj, MarsInput) and number is not None:
             return {"number": number}
+        elif isinstance(input_obj, EmptyInput):
+            return {}
         elif number is not None:
             raise ValueError(
                 f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
