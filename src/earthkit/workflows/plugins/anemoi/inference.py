@@ -35,6 +35,7 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     states = {}
     from anemoi.inference.inputs.empty import EmptyInput
     from anemoi.inference.inputs.mars import MarsInput
+    from anemoi.inference.inputs.cutout import Cutout
 
     # TODO: Replace with a prefetch of all data in the case of dynamics and model uses GribInput during run
     # Use pipes to read and write
@@ -43,12 +44,13 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
             return {"number": number}
         elif isinstance(input_obj, EmptyInput):
             return {}
+        elif isinstance(input_obj, Cutout):
+            return list(_mars_kwargs(x) for x in input_obj.sources.values())[0]
         elif number is not None:
-            raise ValueError(
+            LOG.warning(
                 f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
             )
-        else:
-            return {}
+        return {}
 
     for key in runner.dataset_names:
         dt = to_datetime(date)
