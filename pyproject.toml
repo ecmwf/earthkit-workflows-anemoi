@@ -34,7 +34,7 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-utils",
   "earthkit-workflows>=0.7",
-  "qubed>=0.3",
+  "qubed>=0.3,<0.4.4",
 ]
 optional-dependencies.docs = [
   "autodoc-pydantic",
