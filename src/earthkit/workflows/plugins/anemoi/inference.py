@@ -33,9 +33,9 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     runner = CascadeRunner(**config)
 
     states = {}
+    from anemoi.inference.inputs.cutout import Cutout
     from anemoi.inference.inputs.empty import EmptyInput
     from anemoi.inference.inputs.mars import MarsInput
-    from anemoi.inference.inputs.cutout import Cutout
 
     # TODO: Replace with a prefetch of all data in the case of dynamics and model uses GribInput during run
     # Use pipes to read and write
