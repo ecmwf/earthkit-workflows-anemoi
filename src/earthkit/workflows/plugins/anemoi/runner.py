@@ -69,7 +69,12 @@ class CascadeOutput(Output):
         try:
             grib_memory = BytesIO()
             grib_output = GribMemoryOutput(
-                self.context, self.metadata, out=grib_memory, templates=self._templates, encoding=grib_metadata
+                self.context,
+                self.metadata,
+                out=grib_memory,
+                templates=self._templates,
+                encoding=grib_metadata,
+                check_encoding=False,
             )
             grib_output.write_state(state)
             grib_memory.seek(0, 0)
