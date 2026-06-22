@@ -172,11 +172,11 @@ def _run_model(
     )
 
     step_dimension = next(iter(expansion_qube.values())).axes()["step"]
-    expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
+    expansion_qubes_no_step = {k: v.drop(["step"]) for k, v in expansion_qube.items()}
 
     model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
 
-    dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
+    dataset_qube = reduce(or_, (q.prepend({"dataset": ds}) for ds, q in expansion_qubes_no_step.items()))
     return model_results.expand_as_qube(dataset_qube)
 
 
