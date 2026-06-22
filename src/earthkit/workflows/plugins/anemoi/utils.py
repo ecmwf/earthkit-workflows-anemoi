@@ -195,7 +195,7 @@ def _expansion_qube(
 
         qubes = [Qube.from_datacube(obj) for obj in objs]
         combined_qube: Qube = functools.reduce(operator.or_, qubes)  # type: ignore[reportArgumentType]
-        combined_qube.add_metadata(metadata)
+        # combined_qube.add_metadata(metadata) # TODO: Restore when qubed can handle metadata
         return combined_qube
 
     pressure_qube = make_qubes(
