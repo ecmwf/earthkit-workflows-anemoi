@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from anemoi.utils.dates import as_timedelta
 from earthkit.data.utils.dates import to_datetime
-from earthkit.workflows.fluent import capture_payload_metadata
+from earthkit.workflows.metadata import Artifacts, Requirements
 from qubed import Qube
 
 from earthkit.workflows import fluent
@@ -58,7 +58,8 @@ def _get_initial_conditions_source(
     date: DATE,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
-    payload_metadata: dict[str, Any] | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
 ) -> fluent.Action:
     """
     Get the initial conditions for the model
@@ -72,8 +73,10 @@ def _get_initial_conditions_source(
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Number of ensemble members to get, by default None
-    payload_metadata : Optional[dict[str, Any]], optional
-        Metadata to add to the payload, by default None
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
 
     Returns
     -------
@@ -93,35 +96,35 @@ def _get_initial_conditions_source(
 
     if any(ens is None for ens in ens_members):
         raise ValueError("Ensemble members must be specified when using initial condition perturbation.")
-    if isinstance(config_dict, fluent.Action):
-        init_conditions = config_dict.transform(
-            lambda x, *a: x.map(
-                fluent.Payload(
-                    "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                    args=(fluent.Node.input_name(0)),
-                    kwargs=dict(number=a[0], date=date),
-                    metadata=payload_metadata,
-                )
-            ),
-            params=ens_members,
-            dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
-        )
-        init_conditions._add_dimension("date", [to_datetime(date)])
-        return init_conditions
+    with fluent.NodeMetadataContext(requirements=requirements, artifacts=artifacts):
+        if isinstance(config_dict, fluent.Action):
+            init_conditions = config_dict.transform(
+                lambda x, *a: x.map(
+                    fluent.create_task_instance(
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                        static_input_ps=(fluent.Node.Index(0)),
+                        static_input_kw=dict(number=a[0], date=date),
+                    )
+                ),
+                params=ens_members,
+                dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
+            )
+            init_conditions._add_dimension("date", [to_datetime(date)])
+            return init_conditions
 
-    return fluent.from_source(
-        [
+        return fluent.from_source(
             [
-                fluent.Payload(
-                    "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                    kwargs=dict(config=config_dict, date=date, number=ens_mem),
-                    metadata=payload_metadata,
-                )
-                for ens_mem in ens_members
-            ],
-        ],  # type: ignore
-        coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
-    )
+                [
+                    fluent.create_task_instance(
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                        static_input_ps=(),
+                        static_input_kw=dict(config=config_dict, date=date, number=ens_mem),
+                    )
+                    for ens_mem in ens_members
+                ],
+            ],  # type: ignore
+            coords={"date": [to_datetime(date)], ENSEMBLE_DIMENSION_NAME: ens_members},
+        )
 
 
 def _run_model(
@@ -129,7 +132,8 @@ def _run_model(
     config: RunConfiguration | dict,
     input_state_source: fluent.Action,
     lead_time: LEAD_TIME,
-    payload_metadata: dict[str, Any] | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs,
 ) -> fluent.Action:
     """
@@ -146,8 +150,10 @@ def _run_model(
     lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
-    payload_metadata : Optional[dict[str, Any]], optional
-        Metadata to add to the payload, by default None
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -164,17 +170,18 @@ def _run_model(
         else config
     )
 
-    model_payload = fluent.Payload(
+    model_payload = fluent.create_task_instance(
         "earthkit.workflows.plugins.anemoi.inference.run_as_earthkit",
-        args=(fluent.Node.input_name(0),),
-        kwargs=dict(config=config_dict, lead_time=as_timedelta(lead_time), **kwargs),
-        metadata=dict(**(payload_metadata or {}), needs_gpu=True),
+        static_input_ps=(fluent.Node.Index(0),),
+        static_input_kw=dict(config=config_dict, lead_time=as_timedelta(lead_time), **kwargs),
+        requirements=Requirements(needs_gpu=True),
     )
 
     step_dimension = next(iter(expansion_qube.values())).axes()["step"]
     expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
 
-    model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
+    with fluent.NodeMetadataContext(requirements=requirements, artifacts=artifacts):
+        model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
 
     dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
     return model_results.expand_as_qube(dataset_qube)
@@ -250,7 +257,8 @@ class Inference:
         config: dict,
         input_state_source: fluent.Action,
         *,
-        payload_metadata: dict[str, Any] | None = None,
+        requirements: Requirements | None = None,
+        artifacts: Artifacts | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         model_results = _run_model(
@@ -258,20 +266,22 @@ class Inference:
             config,
             input_state_source,
             self.lead_time,
-            payload_metadata=payload_metadata,
+            requirements=requirements,
+            artifacts=artifacts,
             **kwargs,
         )
         if self._given_single_qube:
             model_results = model_results.select({"dataset": next(iter(self.expansion_qube.keys()))})
         return model_results
 
-    @capture_payload_metadata
     def from_input(
         self,
         input: str | dict[str, Any],
         date: DATE,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
+        requirements: Requirements | None = None,
+        artifacts: Artifacts | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -286,6 +296,10 @@ class Inference:
             Date to get initial conditions for
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
             Number of ensemble members to run, None will run a single instance, by default None
+        requirements : Requirements | None, optional
+            Requirements for running the model, by default None
+        artifacts : Artifacts | None, optional
+            Artifacts required for the model, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -310,19 +324,24 @@ class Inference:
             config=config,
             date=date,
             ensemble_members=ensemble_members,
-            payload_metadata={"environment": environment_dict["initial_conditions"]},
+            requirements=Requirements(environment=environment_dict["initial_conditions"]),
         )
 
-        return self._run_model(
-            config,
-            input_state_source,
-            payload_metadata={"environment": environment_dict["inference"]},
-        )
+        with fluent.NodeMetadataContext(
+            requirements=requirements,
+            artifacts=artifacts,
+        ):
+            return self._run_model(
+                config,
+                input_state_source,
+                requirements=Requirements(environment=environment_dict["inference"]),
+            )
 
-    @capture_payload_metadata
     def from_initial_conditions(
         self,
         initial_conditions: dict[str, State] | None | fluent.Action | fluent.Payload | Callable,
+        requirements: Requirements | None = None,
+        artifacts: Artifacts | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -336,6 +355,10 @@ class Inference:
             None creates a source node that yields None.
             If a fluent action and multiple ensemble member initial conditions
             are included, the dimension must be named `ensemble_member`.
+        requirements : Requirements | None, optional
+            Requirements for running the model, by default None
+        artifacts : Artifacts | None, optional
+            Artifacts required for the model, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -359,18 +382,21 @@ class Inference:
             initial_conditions_source = fluent.from_source([initial_conditions])  # type: ignore
         else:
             initial_conditions_source = fluent.from_source(
-                [fluent.Payload(lambda: initial_conditions)],
+                [fluent.create_task_instance(lambda: initial_conditions)],
                 dims=["date"],
             )  # type: ignore
 
-        return self._run_model(
-            config,
-            initial_conditions_source,
-            payload_metadata={"environment": environment_dict["inference"]},
-        )
+        with fluent.NodeMetadataContext(
+            requirements=requirements,
+            artifacts=artifacts,
+        ):
+            return self._run_model(
+                config,
+                initial_conditions_source,
+                requirements=Requirements(environment=environment_dict["inference"]),
+            )
 
 
-@capture_payload_metadata
 def from_config(
     config: os.PathLike | dict[str, Any] | RunConfiguration,
     overrides: dict[str, Any] | None = None,
@@ -378,6 +404,8 @@ def from_config(
     date: DATE | None = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -400,6 +428,10 @@ def from_config(
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -445,22 +477,25 @@ def from_config(
         config=configuration,
         date=date or configuration.date,  # type: ignore
         ensemble_members=ensemble_members,
-        payload_metadata={"environment": environment["initial_conditions"]},
+        requirements=Requirements(environment=environment["initial_conditions"]),
     )
 
-    return _run_model(
-        expansion_qube_from_metadata(
-            _get_metadata(configuration.checkpoint),  # type: ignore[reportArgumentType]
-            as_timedelta(configuration.lead_time),
-        ),  # type: ignore
-        configuration,
-        input_state_source,
-        configuration.lead_time,
-        payload_metadata={"environment": environment["inference"]},
-    )
+    with fluent.NodeMetadataContext(
+        requirements=requirements,
+        artifacts=artifacts,
+    ):
+        return _run_model(
+            expansion_qube_from_metadata(
+                _get_metadata(configuration.checkpoint),  # type: ignore[reportArgumentType]
+                as_timedelta(configuration.lead_time),
+            ),  # type: ignore
+            configuration,
+            input_state_source,
+            configuration.lead_time,
+            requirements=Requirements(environment=environment["inference"]),
+        )
 
 
-@capture_payload_metadata
 def from_input(
     ckpt: VALID_CKPT,
     input: str | dict[str, Any],
@@ -471,6 +506,8 @@ def from_input(
     environment: ENVIRONMENT | None = None,
     metadata: dict[str, Metadata] | None = None,
     expansion_qube: Qube | dict[str, Qube] | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -501,6 +538,10 @@ def from_input(
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     expansion_qube : Qube | dict[str, Qube] | None, optional
         Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -525,10 +566,11 @@ def from_input(
         input,
         date,
         ensemble_members=ensemble_members,
+        requirements=requirements,
+        artifacts=artifacts,
     )
 
 
-@capture_payload_metadata
 def from_initial_conditions(
     ckpt: VALID_CKPT,
     initial_conditions: State | None | fluent.Action | fluent.Payload | Callable,
@@ -538,6 +580,8 @@ def from_initial_conditions(
     environment: ENVIRONMENT | None = None,
     metadata: dict[str, Metadata] | None = None,
     expansion_qube: Qube | dict[str, Qube] | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -571,6 +615,10 @@ def from_initial_conditions(
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     expansion_qube : Qube | dict[str, Qube] | None, optional
         Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -594,10 +642,11 @@ def from_initial_conditions(
     ).from_initial_conditions(
         initial_conditions,
         ensemble_members=ensemble_members,
+        requirements=requirements,
+        artifacts=artifacts,
     )
 
 
-@capture_payload_metadata
 def get_initial_conditions(
     ckpt: VALID_CKPT,
     input: str | dict[str, Any],
@@ -605,6 +654,8 @@ def get_initial_conditions(
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
     environment: ENVIRONMENT | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -647,6 +698,10 @@ def get_initial_conditions(
         e.g. ``["anemoi-models==0.3.1"]``.
         Can be ``dict[str, list[str]]`` with the key ``"initial_conditions"``
         to set the environment for the retrieval.
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     **kwargs : dict
         Additional arguments to pass to the run configuration
         (e.g. extra input overrides).
@@ -682,12 +737,16 @@ def get_initial_conditions(
     config = {"checkpoint": ckpt, "input": input, **kwargs}
 
     environment_dict = crack_environment(environment, ["initial_conditions"])
-    return _get_initial_conditions_source(
-        config=config,
-        date=date,
-        ensemble_members=ensemble_members,
-        payload_metadata={"environment": environment_dict["initial_conditions"]},
-    )
+    with fluent.NodeMetadataContext(
+        requirements=requirements,
+        artifacts=artifacts,
+    ):
+        return _get_initial_conditions_source(
+            config=config,
+            date=date,
+            ensemble_members=ensemble_members,
+            requirements=Requirements(environment=environment_dict["initial_conditions"]),
+        )
 
 
 def create_dataset(
@@ -772,7 +831,7 @@ def create_dataset(
         "overwrite": overwrite,
         "test": test,
     }
-    payload_metadata = {"environment": environment or []}
+    requirements = Requirements(environment=environment or [])
 
     def get_parallel_options(part: int):
         opt = options.copy()
@@ -794,7 +853,7 @@ def create_dataset(
 
     def get_payload(task: Callable[..., Any]) -> fluent.Payload:
         """Get fluent payload"""
-        return fluent.Payload(task, metadata=payload_metadata)
+        return fluent.create_task_instance(task, requirements=requirements)
 
     def apply_sequential_task(prior: fluent.Action, task_name: str, opt: dict[str, Any] | None = None) -> fluent.Action:
         """Apply a task on each node in the graph"""
@@ -835,7 +894,6 @@ def create_dataset(
     return verify.map(get_path)
 
 
-@capture_payload_metadata
 def from_dataset(
     ckpt: VALID_CKPT,
     dataset_config: dict[str, Any] | os.PathLike,
@@ -848,6 +906,8 @@ def from_dataset(
     environment: ENVIRONMENT | None = None,
     metadata: dict[str, Metadata] | None = None,
     expansion_qube: Qube | dict[str, Qube] | None = None,
+    requirements: Requirements | None = None,
+    artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
     """
@@ -887,6 +947,10 @@ def from_dataset(
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     expansion_qube : Qube | dict[str, Qube] | None, optional
         Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
+    requirements : Requirements | None, optional
+        Requirements for running the model, by default None
+    artifacts : Artifacts | None, optional
+        Artifacts required for the model, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -965,7 +1029,7 @@ def from_dataset(
         environment=environment["dataset"],
     )
     init_conditions_config = dataset_action.map(
-        fluent.Payload(construct_configuration, args=(fluent.Node.input_name(0),))
+        fluent.create_task_instance(construct_configuration, static_input_ps=(fluent.Node.Index(0),))
     )
 
     inference = Inference(
@@ -980,11 +1044,13 @@ def from_dataset(
         config=init_conditions_config,
         date=date,
         ensemble_members=ensemble_members,
-        payload_metadata={"environment": environment["initial_conditions"]},
+        requirements=Requirements(environment=environment["initial_conditions"]),
     )
     return inference.from_initial_conditions(
         initial_conditions=input_state_source,
         ensemble_members=ensemble_members,
+        requirements=requirements,
+        artifacts=artifacts,
     )
 
 
@@ -1000,6 +1066,8 @@ class Action(fluent.Action):
         metadata: dict[str, Metadata] | None = None,
         expansion_qube: Qube | dict[str, Qube] | None = None,
         environment: ENVIRONMENT | None = None,
+        requirements: Requirements | None = None,
+        artifacts: Artifacts | None = None,
         **kwargs,
     ) -> fluent.Action:
         """
@@ -1040,6 +1108,8 @@ class Action(fluent.Action):
             environment=environment,
             metadata=metadata,
             expansion_qube=expansion_qube,
+            requirements=requirements,
+            artifacts=artifacts,
             **kwargs,
         )
 
