@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 
-from earthkit.workflows import Graph
+from earthkit.workflows.graph import Graph
 from earthkit.workflows.plugins.anemoi.fluent import Inference, from_initial_conditions, from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 

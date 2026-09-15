@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 
-from earthkit.workflows import Graph, fluent
+from earthkit.workflows import fluent
+from earthkit.workflows.graph import Graph
 from earthkit.workflows.plugins.anemoi.fluent import (
     Action,
     Inference,

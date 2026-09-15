@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 
-from earthkit.workflows import serialise
+from earthkit.workflows.graph import serialise
 from earthkit.workflows.plugins.anemoi.fluent import from_input
 
 pytestmark = pytest.mark.integration
