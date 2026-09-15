@@ -30,7 +30,6 @@ from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
 from earthkit.workflows.fluent import Action, Payload, nodetree_arrays
 from earthkit.workflows.graph import Node, Output, serialise
 
-
 # ---------------------------------------------------------------------------
 # Shared test helpers (used across multiple test modules)
 # ---------------------------------------------------------------------------

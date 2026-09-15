@@ -1091,6 +1091,10 @@ class Action(fluent.Action):
             If None, will use the current environment
             Should be set to strings, as if used in pip install,
             e.g. `["anemoi-models==0.3.1"]`
+        requirements : Requirements | None, optional
+            Requirements for running the model, by default None
+        artifacts : Artifacts | None, optional
+            Artifacts required for the model, by default None
         kwargs : dict
             Additional arguments to pass to the configuration
 
