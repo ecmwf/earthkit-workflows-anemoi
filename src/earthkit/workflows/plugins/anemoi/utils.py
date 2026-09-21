@@ -263,7 +263,7 @@ def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
 
 def faked_ensemble_transform(act: fluent.Action, ens_num: int | None = None) -> fluent.Action:
     """Transform the action to simulate ensemble members"""
-    return act.map(fluent.Payload(expose_ensemble_dimension, [fluent.Node.input_name(0), ens_num]))
+    return act.map(fluent.create_task_instance(expose_ensemble_dimension, [fluent.Node.Index(0), ens_num]))
 
 
 def _add_self_to_environment(environment: E) -> E:
