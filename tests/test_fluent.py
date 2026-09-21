@@ -239,7 +239,7 @@ def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shap
 
 # --- payload_metadata propagation ---
 
-PAYLOAD_METADATA = {"source": "test", "run_id": "abc123"}
+PAYLOAD_METADATA = {"environment": ["test"], "needs_gpu": True}
 SIMPLE_CKPT = "simple"
 SIMPLE_KWARGS = {"date": "2020-01-01", "lead_time": "1D"}
 
@@ -249,8 +249,8 @@ def assert_payload_metadata(action: Action, expected: dict) -> None:
     for _, narray in nodetree_arrays(action.nodes):
         for node in np.atleast_1d(narray.values).flatten():
             for key, value in expected.items():
-                assert node.payload.metadata.get(key) == value, (
-                    f"Node {node.name!r} missing metadata {key!r}={value!r}, " f"got {node.payload.metadata}"
+                assert getattr(node.metadata.requirements, key) == value, (
+                    f"Node {node.name!r} missing metadata {key!r}={value!r}, " f"got {node.metadata.requirements}"
                 )
 
 
@@ -258,7 +258,7 @@ def assert_payload_metadata(action: Action, expected: dict) -> None:
 def test_from_input_propagates_payload_metadata():
     """payload_metadata passed to from_input is stored on every result node."""
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
-    action = from_input(ckpt, "dummy", payload_metadata=PAYLOAD_METADATA, **SIMPLE_KWARGS)
+    action = from_input(ckpt, "dummy", requirements=PAYLOAD_METADATA, **SIMPLE_KWARGS)
     assert_payload_metadata(action, PAYLOAD_METADATA)
 
 
@@ -268,7 +268,7 @@ def test_from_initial_conditions_propagates_payload_metadata():
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
     kwargs = SIMPLE_KWARGS.copy()
     kwargs.pop("date")
-    action = from_initial_conditions(ckpt, None, payload_metadata=PAYLOAD_METADATA, **kwargs)
+    action = from_initial_conditions(ckpt, None, requirements=PAYLOAD_METADATA, **kwargs)
     assert_payload_metadata(action, PAYLOAD_METADATA)
 
 
@@ -278,7 +278,7 @@ def test_from_config_propagates_payload_metadata(mock_config):
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
     action = from_config(
         mock_config,
-        payload_metadata=PAYLOAD_METADATA,
+        requirements=PAYLOAD_METADATA,
         checkpoint=str(ckpt),
         input="dummy",
         **SIMPLE_KWARGS,
@@ -291,7 +291,7 @@ def test_inference_from_input_propagates_payload_metadata():
     """payload_metadata passed to Inference.from_input is stored on every result node."""
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
     inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
-    action = inference.from_input("dummy", SIMPLE_KWARGS["date"], payload_metadata=PAYLOAD_METADATA)
+    action = inference.from_input("dummy", SIMPLE_KWARGS["date"], requirements=PAYLOAD_METADATA)
     assert_payload_metadata(action, PAYLOAD_METADATA)
 
 
@@ -300,7 +300,7 @@ def test_inference_from_initial_conditions_propagates_payload_metadata():
     """payload_metadata passed to Inference.from_initial_conditions is stored on every result node."""
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
     inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"])
-    action = inference.from_initial_conditions(None, payload_metadata=PAYLOAD_METADATA)
+    action = inference.from_initial_conditions(None, requirements=PAYLOAD_METADATA)
     assert_payload_metadata(action, PAYLOAD_METADATA)
 
 
@@ -360,7 +360,7 @@ def test_inference_class_with_dict_metadata(dict_metadata: dict) -> None:
     """Test Inference class accepts dict metadata."""
     ckpt = (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
     inference = Inference(ckpt, lead_time=SIMPLE_KWARGS["lead_time"], metadata=dict_metadata)
-    action = inference.from_initial_conditions(None, payload_metadata=PAYLOAD_METADATA)
+    action = inference.from_initial_conditions(None, requirements=PAYLOAD_METADATA)
     assert_payload_metadata(action, PAYLOAD_METADATA)
     assert_shape(action, {"step": 4})
 
