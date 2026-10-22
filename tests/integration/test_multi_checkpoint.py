@@ -49,7 +49,7 @@ class TestMultiCheckpoint:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            ensemble_members=2,
+            ensemble_members=range(1, 3),
         )
         # Collect all dims and coords from the tree (including children)
         all_dims = set()

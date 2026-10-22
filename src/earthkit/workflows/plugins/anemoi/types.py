@@ -17,5 +17,7 @@ LEAD_TIME = Union[int, str, datetime.timedelta]
 DATE = Union[datetime.datetime, tuple[int, int, int], str]
 ENVIRONMENT = Union[Mapping[str, list[str]], list[str]]
 
+# An int is a single ensemble member id (0 is the control member), not a count;
+# a sequence (e.g. range(1, 51)) selects several members.
 ENSEMBLE_MEMBER_SPECIFICATION = Union[int, Sequence[int]]
 ENSEMBLE_DIMENSION_NAME: str = "number"

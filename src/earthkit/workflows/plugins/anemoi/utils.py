@@ -242,23 +242,52 @@ def _expansion_qube(
 def parse_ensemble_members(
     ensemble_members: "ENSEMBLE_MEMBER_SPECIFICATION | None",
 ) -> list[int] | list[None]:
-    """Parse ensemble members"""
+    """Parse an ensemble member specification into a list of member ids.
+
+    Parameters
+    ----------
+    ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None
+        None gives no ensemble dimension and returns ``[None]``.
+        An int is a single member id, e.g. ``3`` gives ``[3]``, and ``0`` is the
+        control member. It is an id, not a count: use ``range(1, n + 1)``
+        for ``n`` members. A sequence of int (e.g. ``range(1, 51)``) gives
+        those member ids.
+
+    Returns
+    -------
+    list[int] | list[None]
+        The member ids.
+
+    Raises
+    ------
+    ValueError
+        If an int member id is negative.
+    """
     if ensemble_members is None:
         return [None]
     if isinstance(ensemble_members, int):
-        if ensemble_members < 1:
-            raise ValueError("Number of ensemble members must be greater than 0.")
-        return list(range(1, ensemble_members + 1))
+        if ensemble_members < 0:
+            raise ValueError("Ensemble member id must not be negative.")
+        return [ensemble_members]
     return list(ensemble_members)
 
 
 def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
+    """Label each dataset state in `x` with the ensemble member.
+
+    The input is not modified, as it may be shared between branches
+    labelled with different members. A new outer dict and new per-dataset
+    dicts are returned (shallow copies, the arrays are not copied).
+    """
     assert isinstance(x, dict), "Input state must be a dictionary"
-    if ens_mem is not None:
-        for key, value in x.items():
-            if isinstance(value, dict):
-                x[key][ENSEMBLE_DIMENSION_NAME] = ens_mem
-    return x
+    result: dict = {}
+    for key, value in x.items():
+        if isinstance(value, dict):
+            value = dict(value)
+            if ens_mem is not None:
+                value[ENSEMBLE_DIMENSION_NAME] = ens_mem
+        result[key] = value
+    return result
 
 
 def faked_ensemble_transform(act: fluent.Action, ens_num: int | None = None) -> fluent.Action:

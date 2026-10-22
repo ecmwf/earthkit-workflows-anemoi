@@ -34,7 +34,7 @@ class TestEnsembleDimensionConsistency:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            ensemble_members=3,
+            ensemble_members=range(1, 4),
         )
         assert ENSEMBLE_DIMENSION_NAME in action.nodes.coords
         assert ENSEMBLE_DIMENSION_NAME == "number"
@@ -49,7 +49,7 @@ class TestEnsembleDimensionConsistency:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            ensemble_members=3,
+            ensemble_members=range(1, 4),
         )
         # Check that payloads reference the correct dimension name in their kwargs
         for _, narray in nodetree_arrays(action.nodes):

@@ -348,7 +348,7 @@ class TestFullAtmoDatasetDimension:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            ensemble_members=2,
+            ensemble_members=range(1, 3),
         )
         all_dims, all_coords, _ = collect_dims_and_coords(action)
 

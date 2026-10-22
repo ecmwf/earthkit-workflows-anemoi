@@ -54,3 +54,30 @@ def test_expose_ensemble_dimension_none_member():
     state = {"data": {"date": "2020-01-01"}}
     result = expose_ensemble_dimension(state, None)
     assert ENSEMBLE_DIMENSION_NAME not in result["data"]
+
+
+def test_expose_ensemble_dimension_does_not_mutate_input():
+    """Members 0 and 3 applied to one shared state are labelled separately, the source is unchanged."""
+    from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
+
+    array = object()
+    state = {"data": {"date": "2020-01-01", "field": array}, "other": {"date": "2020-01-01"}}
+
+    control = expose_ensemble_dimension(state, 0)
+    perturbed = expose_ensemble_dimension(state, 3)
+
+    assert control["data"][ENSEMBLE_DIMENSION_NAME] == 0
+    assert control["other"][ENSEMBLE_DIMENSION_NAME] == 0
+    assert perturbed["data"][ENSEMBLE_DIMENSION_NAME] == 3
+    assert perturbed["other"][ENSEMBLE_DIMENSION_NAME] == 3
+
+    # Source is unchanged
+    assert state == {"data": {"date": "2020-01-01", "field": array}, "other": {"date": "2020-01-01"}}
+    assert ENSEMBLE_DIMENSION_NAME not in state["data"]
+
+    # New outer and per-dataset dicts, but the values are shared, not copied
+    for result in (control, perturbed):
+        assert result is not state
+        assert result["data"] is not state["data"]
+        assert result["other"] is not state["other"]
+        assert result["data"]["field"] is array

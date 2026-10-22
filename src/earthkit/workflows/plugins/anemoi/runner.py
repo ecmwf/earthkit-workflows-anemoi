@@ -34,6 +34,29 @@ from .types import ENSEMBLE_DIMENSION_NAME
 LOG = logging.getLogger(__name__)
 
 
+def _grib_metadata(ensemble_member: int | None) -> dict:
+    """GRIB encoding metadata for a given ensemble member.
+
+    Member 0 is the control forecast (type cf), members above 0 are perturbed
+    forecasts (type pf), and None means a non-ensemble forecast.
+    """
+    grib_metadata: dict = {
+        "edition": 2,
+        "type": "fc",
+        "class": "ai",
+    }
+    if ensemble_member is not None:
+        grib_metadata.update(
+            {
+                "productDefinitionTemplateNumber": 1,
+                "type": "cf" if ensemble_member == 0 else "pf",
+                "stream": "enfo",
+                "number": ensemble_member,
+            }
+        )
+    return grib_metadata
+
+
 @output_registry.register("cascade")
 class CascadeOutput(Output):
     """Custom output class for the CascadeRunner that converts model states to GRIB format and then to earthkit FieldList."""
@@ -47,24 +70,7 @@ class CascadeOutput(Output):
     def write_step(self, state: dict) -> ekd.SimpleFieldList:  # type: ignore[reportIncompatibleMethodOverride]
         initial_date: datetime = state["date"]
         ensemble_member = state.get(ENSEMBLE_DIMENSION_NAME, None)
-        grib_metadata = {}
-
-        grib_metadata.update(
-            {
-                "edition": 2,
-                "type": "fc",
-                "class": "ai",
-            }
-        )
-        if ensemble_member is not None:
-            grib_metadata.update(
-                {
-                    "productDefinitionTemplateNumber": 1,
-                    "type": "pf",
-                    "stream": "enfo",
-                    "number": ensemble_member,
-                }
-            )
+        grib_metadata = _grib_metadata(ensemble_member)
 
         try:
             grib_memory = BytesIO()
