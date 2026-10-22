@@ -1,0 +1,64 @@
+# This workflow uses an action to run Release Please to create a release PR.
+# It is governed by the config and manifest in the root of the repo.
+# For more information see: https://github.com/googleapis/release-please
+#
+# Branching model:
+# - `develop` is the main development branch. release-please keeps a draft
+#   release PR open against it.
+# - Merging the release PR creates the tag and GitHub release on `develop`,
+#   which triggers the cd-pypi workflow.
+# - `main` is then fast-forwarded to the release tag, so it always points at
+#   the latest release. It is never committed to directly.
+# - Hotfixes: branch `hotfix/<name>` from the latest release tag; release-please
+#   opens a release PR against that branch. Merge the hotfix into `develop`
+#   afterwards.
+name: Run Release Please
+on:
+  push:
+    branches:
+      - develop
+      - hotfix/*
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # A personal access token (PAT) stored as the `RELEASE_PLEASE_TOKEN`
+          # secret is needed so the created tag triggers the cd-pypi workflow
+          # (events created with the default GITHUB_TOKEN do not trigger workflows).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: ${{ github.ref_name }}
+
+  update-main:
+    # Move `main` to the new release. Only for releases from `develop`.
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' && github.ref_name == 'develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - name: Fast-forward main to the release tag
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          git fetch origin --tags
+          # A plain (non-force) push only succeeds as a fast-forward.
+          git push origin "refs/tags/${TAG}^{commit}:refs/heads/main"

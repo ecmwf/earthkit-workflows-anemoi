@@ -55,7 +55,7 @@ class TestEnsembleDimensionConsistency:
         for _, narray in nodetree_arrays(action.nodes):
             for node in np.atleast_1d(narray.values).flatten():
                 if hasattr(node, "payload") and node.payload is not None:
-                    kwargs = node.payload.kwargs
+                    kwargs = node.payload.static_input_kw
                     # If there's a dimension argument, it should match
                     if "dim" in kwargs:
                         dim_val = kwargs["dim"]

@@ -17,6 +17,8 @@ from earthkit.workflows.graph import serialise
 
 from earthkit.workflows.plugins.anemoi.fluent import from_input
 
+from .conftest import string_entrypoint
+
 pytestmark = pytest.mark.integration
 
 
@@ -36,35 +38,43 @@ class TestPayloadMetadataIntegration:
         graph = action.graph()
         anemoi_nodes_found = 0
         for node in graph.nodes():
-            p = node.payload
-            if p is not None and hasattr(p, "func") and isinstance(p.func, str):
+            func = string_entrypoint(node.payload)
+            if func is not None:
                 anemoi_nodes_found += 1
-                assert (
-                    "environment" in p.metadata
-                ), f"Node {node.name!r} with func {p.func!r} missing environment metadata"
+                assert node.payload.definition.environment == [
+                    "anemoi-inference~=0.11"
+                ], f"Node {node.name!r} with func {func!r} missing environment metadata"
         assert anemoi_nodes_found > 0, "No anemoi payload nodes found in graph"
 
     @fake_checkpoints
-    def test_custom_payload_metadata_survives_graph(self, simple_ckpt_path):
-        """Custom payload_metadata should be on every node after graph construction."""
-        custom = {"experiment_id": "test-001", "run_type": "integration"}
+    def test_custom_requirements_survive_graph(self, simple_ckpt_path):
+        """Custom requirements should be on every model and downstream node, including after serialisation."""
+        custom = {"environment": ["custom-env==1.0"], "needs_gpu": True}
         action = from_input(
             simple_ckpt_path,
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            payload_metadata=custom,
+            requirements=custom,
         )
-        graph = action.graph()
-        serialised = serialise(graph)
+        serialised = serialise(action.graph())
 
-        # The metadata should survive serialisation
+        checked = 0
         for node_name, node_data in serialised.items():
-            if "payload" in node_data:
-                payload = node_data["payload"]
-                if isinstance(payload, dict) and "metadata" in payload:
-                    for key in custom:
-                        assert key in payload["metadata"]
+            payload = node_data["payload"]
+            entrypoint = string_entrypoint(payload)
+            # The initial-conditions fetch is built outside the `requirements` context
+            # in `Inference.from_input`, so it does not carry the user's requirements.
+            if entrypoint is not None and entrypoint.endswith("._get_initial_conditions"):
+                continue
+            definition = payload.definition
+            assert (
+                definition.environment == custom["environment"]
+            ), f"Node {node_name!r} has environment {definition.environment!r}, expected {custom['environment']!r}"
+            assert definition.needs_gpu is True, f"Node {node_name!r} should have needs_gpu=True"
+            checked += 1
+
+        assert checked > 1, "Expected the model run and downstream nodes to be checked"
 
     @fake_checkpoints
     def test_run_as_earthkit_has_needs_gpu(self, simple_ckpt_path):
@@ -73,11 +83,12 @@ class TestPayloadMetadataIntegration:
         graph = action.graph()
         model_nodes_found = 0
         for node in graph.nodes():
-            p = node.payload
-            if p is not None and hasattr(p, "func") and isinstance(p.func, str) and "run_as_earthkit" in p.func:
+            func = string_entrypoint(node.payload)
+            if func is not None and "run_as_earthkit" in func:
                 model_nodes_found += 1
-                assert p.metadata.get("needs_gpu") is True, (
-                    f"Node {node.name!r} with func {p.func!r} should have needs_gpu=True "
-                    f"in metadata, got {p.metadata}"
+                needs_gpu = node.payload.definition.needs_gpu
+                assert needs_gpu is True, (
+                    f"Node {node.name!r} with func {func!r} should have needs_gpu=True "
+                    f"in its task definition, got {needs_gpu!r}"
                 )
         assert model_nodes_found > 0, "No run_as_earthkit nodes found in graph"
