@@ -635,6 +635,35 @@ def test_module_from_initial_conditions_members_not_in_run_config(captured_confi
 
 
 @fake_checkpoints
+def test_from_initial_conditions_none_placeholder_labelling_tasks_execute():
+    """The labelling tasks of a `None` initial conditions placeholder run, and pass `None` through.
+
+    The member ids stay on the `number` dimension of the action.
+    """
+    from cascade.low.core import TaskDefinition
+
+    from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
+
+    action = from_initial_conditions(_ckpt(), None, ensemble_members=[0, 3], **ENS_KWARGS)
+    assert _ens_coords(action) == [0, 3]
+
+    labelling = []
+    for node in action.graph().nodes():
+        definition = node.payload.definition
+        if definition.func is None:
+            continue
+        func = TaskDefinition.func_dec(definition.func)
+        if func is expose_ensemble_dimension:
+            labelling.append(node.payload)
+
+    # Upstream value of the initial conditions placeholder is `None`, the member is a static argument
+    assert sorted(payload.static_input_ps["1"] for payload in labelling) == [0, 3]
+    for payload in labelling:
+        func = TaskDefinition.func_dec(payload.definition.func)
+        assert func(None, payload.static_input_ps["1"]) is None
+
+
+@fake_checkpoints
 def test_action_infer_members_not_in_run_config(captured_configs):
     action = _ens_source([1, 2, 3])
     result = Action(action.nodes).infer(_ckpt(), ensemble_members=[1, 2, 3], **ENS_KWARGS)

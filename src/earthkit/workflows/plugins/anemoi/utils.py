@@ -272,13 +272,19 @@ def parse_ensemble_members(
     return list(ensemble_members)
 
 
-def expose_ensemble_dimension(x: dict, ens_mem: int | None) -> dict:
+def expose_ensemble_dimension(x: dict | None, ens_mem: int | None) -> dict | None:
     """Label each dataset state in `x` with the ensemble member.
 
     The input is not modified, as it may be shared between branches
     labelled with different members. A new outer dict and new per-dataset
     dicts are returned (shallow copies, the arrays are not copied).
+
+    A `None` input is a graph placeholder for initial conditions that are
+    supplied elsewhere. It is returned unchanged, as there is no state to
+    label.
     """
+    if x is None:
+        return None
     assert isinstance(x, dict), "Input state must be a dictionary"
     result: dict = {}
     for key, value in x.items():

@@ -86,6 +86,11 @@ class TestExposeEnsembleDimension:
         with pytest.raises(AssertionError, match="dictionary"):
             expose_ensemble_dimension("not a dict", 1)
 
+    def test_none_placeholder_passed_through(self):
+        """`None` initial conditions are a graph placeholder, there is no state to label."""
+        assert expose_ensemble_dimension(None, 3) is None
+        assert expose_ensemble_dimension(None, None) is None
+
     def test_uses_constant_not_hardcoded(self):
         """Ensure the function uses the ENSEMBLE_DIMENSION_NAME constant."""
         state = {"data": {}}
