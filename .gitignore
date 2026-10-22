@@ -194,6 +194,8 @@ bar
 *.nc
 *.npz
 *.json
+!.release-please-config.json
+!.release-please-manifest.json
 *.zarr/
 ~$images.pptx
 test.py
