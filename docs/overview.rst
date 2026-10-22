@@ -30,7 +30,6 @@ The base installation includes only:
 For local workflow execution, install with ``[runtime]`` extra:
 
 -  ``anemoi-inference>=0.7`` - AI weather model inference
--  ``anemoi-datasets>=0.5.21`` - Dataset creation and management
 
 This separation allows:
 
