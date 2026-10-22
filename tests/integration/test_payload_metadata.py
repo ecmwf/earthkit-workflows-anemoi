@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 from earthkit.workflows.graph import serialise
+from earthkit.workflows.metadata import Requirements
 
 from earthkit.workflows.plugins.anemoi.fluent import from_input
 
@@ -33,7 +34,7 @@ class TestPayloadMetadataIntegration:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            environment=["anemoi-inference~=0.11"],
+            requirements=Requirements(environment=["anemoi-inference~=0.11"]),
         )
         graph = action.graph()
         anemoi_nodes_found = 0

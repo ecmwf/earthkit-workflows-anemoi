@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,9 +16,17 @@ import numpy as np
 import pytest
 from anemoi.inference.testing import fake_checkpoints
 from earthkit.workflows.fluent import nodetree_arrays
+from earthkit.workflows.metadata import Artifacts, Requirements
 from xarray import DataArray, DataTree
 
-from earthkit.workflows.plugins.anemoi.fluent import Action, Inference, from_config, from_initial_conditions, from_input
+from earthkit.workflows.plugins.anemoi.fluent import (
+    Action,
+    Inference,
+    from_config,
+    from_initial_conditions,
+    from_input,
+    get_initial_conditions,
+)
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
 STANDARD_INFERENCE_TESTS = [
@@ -675,3 +684,449 @@ def test_action_infer_members_not_in_run_config(captured_configs):
     result = Action(action.nodes).infer(_ckpt(), **ENS_KWARGS)
     assert "ensemble_members" not in captured_configs[1]
     assert _ens_coords(result) == [1, 2, 3]
+
+
+# --- per-stage requirements, artifacts and the deprecated environment ---
+
+SELF_PACKAGE = "earthkit-workflows-anemoi"
+ARTIFACTS = Artifacts(artifact_urls={"model": "https://example.com/model"})
+
+
+def simple_ckpt() -> Path:
+    return (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+
+
+def graph_nodes(action: Action) -> list:
+    """All nodes the result of an action depends on, including the result nodes."""
+    seen = {}
+    stack = []
+    for _, narray in nodetree_arrays(action.nodes):
+        stack.extend(np.atleast_1d(narray.values).flatten())
+    while stack:
+        node = stack.pop()
+        if node.name in seen:
+            continue
+        seen[node.name] = node
+        stack.extend(output.parent for output in node.inputs.values())
+    return list(seen.values())
+
+
+def stage_nodes(action: Action) -> tuple[list, list, list]:
+    """Split the graph into model nodes, initial condition source nodes and the other (expansion) nodes."""
+    nodes = graph_nodes(action)
+    model = [n for n in nodes if n.payload.definition.entrypoint.endswith("run_as_earthkit")]
+    sources = [n for n in nodes if not n.inputs]
+    others = [n for n in nodes if n not in model and n not in sources]
+    assert model and sources and others
+    return model, sources, others
+
+
+def environment_of(node) -> set[str]:
+    return set(node.metadata.requirements.environment)
+
+
+def deprecation_warnings(records: list[warnings.WarningMessage]) -> list[warnings.WarningMessage]:
+    return [r for r in records if issubclass(r.category, DeprecationWarning) and "environment" in str(r.message)]
+
+
+@fake_checkpoints
+def test_per_stage_requirements_reach_the_right_nodes():
+    """A dict keyed by stage puts each requirements on the nodes of that stage only."""
+    inference = Inference(simple_ckpt(), lead_time="1D")
+    action = inference.from_input(
+        "dummy",
+        "2020-01-01",
+        requirements={
+            "inference": Requirements(environment=["model-pkg"]),
+            "initial_conditions": {"environment": ["ic-pkg"]},
+        },
+    )
+    model, sources, others = stage_nodes(action)
+    assert all(environment_of(n) == {"model-pkg"} for n in model)
+    assert all(environment_of(n) == {"ic-pkg"} for n in sources)
+    assert all(n.metadata.requirements.needs_gpu is None for n in sources)
+    assert all(environment_of(n) == {"model-pkg"} for n in others)
+
+
+@fake_checkpoints
+def test_per_stage_requirements_with_missing_stage():
+    """A stage missing from the dict gets no requirements."""
+    action = Inference(simple_ckpt(), lead_time="1D").from_input(
+        "dummy", "2020-01-01", requirements={"initial_conditions": {"environment": ["ic-pkg"]}}
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == set() for n in model)
+    assert all(environment_of(n) == {"ic-pkg"} for n in sources)
+
+
+@fake_checkpoints
+def test_per_stage_requirements_from_config(mock_config):
+    """Per-stage requirements reach the right nodes in `from_config`."""
+    action = from_config(
+        mock_config,
+        requirements={"inference": {"environment": ["model-pkg"]}, "initial_conditions": {"environment": ["ic-pkg"]}},
+        checkpoint=str(simple_ckpt()),
+        input="dummy",
+        **SIMPLE_KWARGS,
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"model-pkg"} for n in model)
+    assert all(environment_of(n) == {"ic-pkg"} for n in sources)
+
+
+@fake_checkpoints
+def test_single_requirements_reach_initial_conditions_and_inference():
+    """A single `Requirements` applies to the initial condition and the inference nodes."""
+    requirements = Requirements(environment=["shared"], needs_gpu=True)
+    action = Inference(simple_ckpt(), lead_time="1D").from_input("dummy", "2020-01-01", requirements=requirements)
+    model, sources, others = stage_nodes(action)
+    for node in [*model, *sources, *others]:
+        assert environment_of(node) == {"shared"}
+        assert node.metadata.requirements.needs_gpu is True
+
+
+@fake_checkpoints
+def test_single_requirements_reach_from_initial_conditions_source():
+    """The source nodes built by `from_initial_conditions` get the requirements too."""
+    action = Inference(simple_ckpt(), lead_time="1D").from_initial_conditions(
+        None, requirements=Requirements(environment=["shared"])
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"shared"} for n in [*model, *sources])
+
+
+@fake_checkpoints
+def test_ensemble_expansion_gets_initial_conditions_stage():
+    """The ensemble member expansion of `from_initial_conditions` is part of the `initial_conditions` stage."""
+    action = Inference(simple_ckpt(), lead_time="1D").from_initial_conditions(
+        None,
+        ensemble_members=[1, 2],
+        requirements={"inference": {"environment": ["model-pkg"]}, "initial_conditions": {"environment": ["ic-pkg"]}},
+        artifacts=ARTIFACTS,
+    )
+    model, sources, _ = stage_nodes(action)
+    # Nodes between the source and the model nodes are the ensemble member expansion
+    expansion = {}
+    stack = [output.parent for node in model for output in node.inputs.values()]
+    while stack:
+        node = stack.pop()
+        if node in sources or node.name in expansion:
+            continue
+        expansion[node.name] = node
+        stack.extend(output.parent for output in node.inputs.values())
+    assert expansion
+    for node in [*expansion.values(), *sources]:
+        assert environment_of(node) == {"ic-pkg"}
+        assert node.metadata.artifacts.artifact_urls == ARTIFACTS.artifact_urls
+
+
+@fake_checkpoints
+def test_from_initial_conditions_requirements_are_positional():
+    """`requirements` is still the second positional argument of `Inference.from_initial_conditions`."""
+    action = Inference(simple_ckpt(), lead_time="1D").from_initial_conditions(
+        None, {"inference": {"environment": ["model-pkg"]}, "initial_conditions": {"environment": ["ic-pkg"]}}
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"model-pkg"} for n in model)
+    assert all(environment_of(n) == {"ic-pkg"} for n in sources)
+
+
+@fake_checkpoints
+def test_model_nodes_keep_needs_gpu():
+    """Model nodes need a GPU, with or without requirements, and nothing else does by default."""
+    for requirements in (None, Requirements(environment=["x"]), {"inference": {"environment": ["x"]}}):
+        action = Inference(simple_ckpt(), lead_time="1D").from_input("dummy", "2020-01-01", requirements=requirements)
+        model, sources, _ = stage_nodes(action)
+        assert all(n.metadata.requirements.needs_gpu is True for n in model)
+        assert all(n.metadata.requirements.needs_gpu is None for n in sources)
+
+
+@fake_checkpoints
+def test_artifacts_reach_initial_conditions_and_inference(mock_config):
+    """Artifacts are on every node created by a call, initial conditions included."""
+    ckpt = simple_ckpt()
+    actions = [
+        Inference(ckpt, lead_time="1D").from_input("dummy", "2020-01-01", artifacts=ARTIFACTS),
+        Inference(ckpt, lead_time="1D").from_initial_conditions(None, artifacts=ARTIFACTS),
+        from_input(ckpt, "dummy", artifacts=ARTIFACTS, **SIMPLE_KWARGS),
+        from_initial_conditions(ckpt, None, artifacts=ARTIFACTS, lead_time="1D"),
+        from_config(mock_config, artifacts=ARTIFACTS, checkpoint=str(ckpt), input="dummy", **SIMPLE_KWARGS),
+    ]
+    for action in actions:
+        model, sources, others = stage_nodes(action)
+        for node in [*model, *sources, *others]:
+            assert node.metadata.artifacts.artifact_urls == ARTIFACTS.artifact_urls
+
+
+@fake_checkpoints
+def test_user_objects_are_not_modified_and_can_be_reused():
+    """One `Requirements` and one `Artifacts` used in several calls are unchanged afterwards."""
+    requirements = Requirements(environment=["shared"], needs_gpu=True)
+    per_stage = {"inference": Requirements(environment=["model-pkg"]), "initial_conditions": {"environment": ["ic"]}}
+    artifacts = Artifacts(artifact_urls={"a": "b"})
+    requirements_before = requirements.model_copy(deep=True)
+    per_stage_before = {
+        "inference": per_stage["inference"].model_copy(deep=True),
+        "initial_conditions": {"environment": ["ic"]},
+    }
+    artifacts_before = artifacts.model_copy(deep=True)
+
+    inference = Inference(simple_ckpt(), lead_time="1D", requirements=requirements)
+    for _ in range(2):
+        inference.from_input("dummy", "2020-01-01", requirements=requirements, artifacts=artifacts)
+        inference.from_initial_conditions(None, requirements, artifacts)
+        inference.from_input("dummy", "2020-01-01", requirements=per_stage, artifacts=artifacts)
+        from_input(simple_ckpt(), "dummy", requirements=requirements, artifacts=artifacts, **SIMPLE_KWARGS)
+
+    assert requirements == requirements_before
+    assert per_stage == per_stage_before
+    assert artifacts == artifacts_before
+
+
+@fake_checkpoints
+def test_constructor_and_method_requirements_are_merged():
+    """Requirements of the constructor and of the method are merged for each stage."""
+    inference = Inference(
+        simple_ckpt(),
+        lead_time="1D",
+        requirements={
+            "inference": {"environment": ["from-init"], "needs_gpu": True},
+            "initial_conditions": {"environment": ["ic-init"]},
+        },
+    )
+    action = inference.from_input(
+        "dummy", "2020-01-01", requirements={"inference": Requirements(environment=["from-call"])}
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"from-init", "from-call"} for n in model)
+    assert all(environment_of(n) == {"ic-init"} for n in sources)
+
+    action = inference.from_initial_conditions(None, Requirements(environment=["everywhere"]))
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"from-init", "everywhere"} for n in model)
+    assert all(environment_of(n) == {"ic-init", "everywhere"} for n in sources)
+
+
+@fake_checkpoints
+def test_constructor_requirements_alone_apply():
+    """Requirements given only to the constructor apply to later calls."""
+    inference = Inference(simple_ckpt(), lead_time="1D", requirements=Requirements(environment=["init-only"]))
+    model, sources, _ = stage_nodes(inference.from_input("dummy", "2020-01-01"))
+    assert all(environment_of(n) == {"init-only"} for n in [*model, *sources])
+
+
+def existing_initial_conditions() -> Action:
+    from earthkit.workflows import fluent
+
+    return Action(
+        fluent.from_source([None], dims=[ENSEMBLE_DIMENSION_NAME], coords={ENSEMBLE_DIMENSION_NAME: [0]}).nodes
+    )
+
+
+DEPRECATED_CALLS = {
+    "Inference": lambda ckpt, config, env: Inference(ckpt, lead_time="1D", environment=env),
+    "from_input": lambda ckpt, config, env: from_input(ckpt, "dummy", environment=env, **SIMPLE_KWARGS),
+    "from_initial_conditions": lambda ckpt, config, env: from_initial_conditions(
+        ckpt, None, lead_time="1D", environment=env
+    ),
+    "from_config": lambda ckpt, config, env: from_config(
+        config, environment=env, checkpoint=str(ckpt), input="dummy", **SIMPLE_KWARGS
+    ),
+    "Action.infer": lambda ckpt, config, env: existing_initial_conditions().infer(ckpt, "1D", environment=env),
+}
+
+
+@pytest.mark.parametrize("name", list(DEPRECATED_CALLS))
+@fake_checkpoints
+def test_deprecated_environment_warns_once_and_applies(name, mock_config):
+    """`environment` warns exactly once, at the line of the caller, and still reaches the nodes."""
+    environment = ["legacy-pkg"]
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        result = DEPRECATED_CALLS[name](simple_ckpt(), mock_config, environment)
+
+    found = deprecation_warnings(records)
+    assert len(found) == 1, [str(r.message) for r in found]
+    assert found[0].filename == __file__
+    assert environment == ["legacy-pkg"]
+
+    if name == "Inference":
+        result = result.from_initial_conditions(None)
+    model, sources, _ = stage_nodes(result)
+    assert all(environment_of(n) == {"legacy-pkg"} for n in model)
+    if name != "Action.infer":  # the graph given to `infer` already exists
+        assert all(environment_of(n) == {"legacy-pkg"} for n in sources)
+
+
+@fake_checkpoints
+def test_no_warning_without_environment(mock_config):
+    """Nothing is warned about when `environment` is not used."""
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        for name, call in DEPRECATED_CALLS.items():
+            call(simple_ckpt(), mock_config, None)
+    assert deprecation_warnings(records) == []
+
+
+@fake_checkpoints
+def test_deprecated_environment_and_requirements_are_merged():
+    """`environment` and `requirements` are merged, not one over the other."""
+    with pytest.warns(DeprecationWarning, match="environment"):
+        action = from_input(
+            simple_ckpt(),
+            "dummy",
+            environment=["legacy-pkg"],
+            requirements=Requirements(environment=["new-pkg"], needs_gpu=True),
+            **SIMPLE_KWARGS,
+        )
+    model, sources, others = stage_nodes(action)
+    for node in [*model, *sources, *others]:
+        assert environment_of(node) == {"legacy-pkg", "new-pkg"}
+        assert node.metadata.requirements.needs_gpu is True
+
+
+@fake_checkpoints
+def test_deprecated_environment_dict_is_per_stage():
+    """A dict `environment` is keyed by stage."""
+    with pytest.warns(DeprecationWarning, match="environment"):
+        action = from_input(
+            simple_ckpt(),
+            "dummy",
+            environment={"inference": ["model-pkg"], "initial_conditions": ["ic-pkg"]},
+            **SIMPLE_KWARGS,
+        )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"model-pkg"} for n in model)
+    assert all(environment_of(n) == {"ic-pkg"} for n in sources)
+
+
+def test_fiab_shaped_calls(monkeypatch):
+    """The way forecast-in-a-box calls the class keeps working, with one warning and one self pin."""
+    from qubed import Qube
+
+    monkeypatch.setattr("earthkit.workflows.plugins.anemoi.__version__", "1.2.3")
+    own_pin = f"{SELF_PACKAGE}==9.9.9"
+    environment = ["some-pkg==1.0", own_pin]
+    qube = Qube.from_datacube({"param": [6, 7], "level": [1, 2, 3, 4], "step": [0, 1, 2, 3]})
+    artifacts = Artifacts(artifact_urls={"model-id": "https://example.com/model"})
+
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        inference = Inference(
+            ckpt="non_existent.ckpt",
+            lead_time="1D",
+            environment=environment,
+            expansion_qube=qube,
+        )
+        from_input_action = inference.from_input(
+            input="dummy", date="2020-01-01", ensemble_members=2, artifacts=artifacts
+        )
+        from_ic_action = inference.from_initial_conditions(None, artifacts=artifacts)
+
+    found = deprecation_warnings(records)
+    assert len(found) == 1
+    assert found[0].filename == __file__
+    assert environment == ["some-pkg==1.0", own_pin]
+
+    for action in (from_input_action, from_ic_action):
+        model, sources, others = stage_nodes(action)
+        for node in [*model, *sources, *others]:
+            assert node.metadata.artifacts.artifact_urls == artifacts.artifact_urls
+        for node in model:
+            assert environment_of(node) == set(environment)
+            assert [e for e in node.metadata.requirements.environment if e.startswith(SELF_PACKAGE)] == [own_pin]
+            assert node.metadata.requirements.needs_gpu is True
+
+
+def test_self_pin_is_not_added_twice_when_merging(monkeypatch):
+    """An own pin from the constructor is not joined by an automatic one from the method requirements."""
+    from qubed import Qube
+
+    monkeypatch.setattr("earthkit.workflows.plugins.anemoi.__version__", "1.2.3")
+    qube = Qube.from_datacube({"param": [6, 7], "level": [1, 2, 3, 4], "step": [0, 1, 2, 3]})
+    inference = Inference(
+        "non_existent.ckpt",
+        lead_time="1D",
+        expansion_qube=qube,
+        requirements=Requirements(environment=[f"{SELF_PACKAGE}==9.9.9"]),
+    )
+    action = inference.from_initial_conditions(None, Requirements(environment=["extra"]))
+    model, sources, _ = stage_nodes(action)
+    for node in [*model, *sources]:
+        assert environment_of(node) == {f"{SELF_PACKAGE}==9.9.9", "extra"}
+
+
+def test_self_pin_is_added_per_stage(monkeypatch):
+    """The package itself is added to every stage that has an environment."""
+    from qubed import Qube
+
+    monkeypatch.setattr("earthkit.workflows.plugins.anemoi.__version__", "1.2.3")
+    qube = Qube.from_datacube({"param": [6, 7], "level": [1, 2, 3, 4], "step": [0, 1, 2, 3]})
+    action = Inference("non_existent.ckpt", lead_time="1D", expansion_qube=qube).from_initial_conditions(
+        None, {"inference": {"environment": ["x"]}, "initial_conditions": {"environment": ["y"]}}
+    )
+    model, sources, _ = stage_nodes(action)
+    assert all(environment_of(n) == {"x", f"{SELF_PACKAGE}~=1.2.3"} for n in model)
+    assert all(environment_of(n) == {"y", f"{SELF_PACKAGE}~=1.2.3"} for n in sources)
+
+
+# --- get_initial_conditions ---
+
+
+def test_get_initial_conditions_stage_requirements_and_artifacts():
+    """Only the `initial_conditions` stage is used, and artifacts reach every node."""
+    action = get_initial_conditions(
+        simple_ckpt(),
+        "dummy",
+        "2020-01-01",
+        ensemble_members=[1, 2],
+        requirements={
+            "inference": {"environment": ["model-pkg"], "needs_gpu": True},
+            "initial_conditions": Requirements(environment=["ic-pkg"]),
+        },
+        artifacts=ARTIFACTS,
+    )
+    nodes = graph_nodes(action)
+    assert len(nodes) == 2
+    for node in nodes:
+        assert environment_of(node) == {"ic-pkg"}
+        assert node.metadata.requirements.needs_gpu is None
+        assert node.metadata.artifacts.artifact_urls == ARTIFACTS.artifact_urls
+
+
+def test_get_initial_conditions_single_requirements():
+    action = get_initial_conditions(
+        simple_ckpt(), "dummy", "2020-01-01", requirements=Requirements(environment=["shared"], needs_gpu=True)
+    )
+    for node in graph_nodes(action):
+        assert environment_of(node) == {"shared"}
+        assert node.metadata.requirements.needs_gpu is True
+
+
+@pytest.mark.parametrize(
+    "environment", [["legacy-pkg"], {"initial_conditions": ["legacy-pkg"], "inference": ["other"]}]
+)
+def test_get_initial_conditions_deprecated_environment(environment):
+    """`environment` warns once at the caller's line, and is merged with `requirements`."""
+    requirements = Requirements(environment=["new-pkg"], needs_gpu=True)
+    before = requirements.model_copy(deep=True)
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        action = get_initial_conditions(
+            simple_ckpt(), "dummy", "2020-01-01", environment=environment, requirements=requirements
+        )
+
+    found = deprecation_warnings(records)
+    assert len(found) == 1, [str(r.message) for r in found]
+    assert found[0].filename == __file__
+    assert requirements == before
+    for node in graph_nodes(action):
+        assert environment_of(node) == {"legacy-pkg", "new-pkg"}
+        assert node.metadata.requirements.needs_gpu is True
+
+
+def test_get_initial_conditions_no_warning_without_environment():
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        get_initial_conditions(simple_ckpt(), "dummy", "2020-01-01", requirements=Requirements(environment=["x"]))
+    assert deprecation_warnings(records) == []

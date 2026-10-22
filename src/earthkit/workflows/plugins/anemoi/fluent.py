@@ -28,7 +28,14 @@ from qubed import Qube
 from earthkit.workflows import fluent
 
 from .types import ENSEMBLE_DIMENSION_NAME
-from .utils import crack_environment, expansion_qube_from_metadata, faked_ensemble_transform, parse_ensemble_members
+from .utils import (
+    _add_self_to_environment,
+    crack_requirements,
+    expansion_qube_from_metadata,
+    faked_ensemble_transform,
+    parse_ensemble_members,
+    warn_environment_deprecated,
+)
 
 if TYPE_CHECKING:
     # anemoi-inference imports
@@ -36,11 +43,45 @@ if TYPE_CHECKING:
     from anemoi.inference.metadata import Metadata
     from anemoi.inference.types import State
 
-    from .types import DATE, ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME, VALID_CKPT
+    from .types import DATE, ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME, REQUIREMENTS, VALID_CKPT
 
 LOG = logging.getLogger(__name__)
 T = TypeVar("T")
 DEFAULT_DATASET_NAME = "data"
+SELF_PACKAGE_NAME = "earthkit-workflows-anemoi"
+INFERENCE_STAGES = ["inference", "initial_conditions"]
+
+
+def _merge_stage_requirements(first: Requirements, second: Requirements) -> Requirements:
+    """
+    Merge two normalised requirements of one stage into a new `Requirements`.
+
+    The merge is additive, as in `earthkit.workflows.metadata.update_requirements`:
+    union of the environments and ``needs_gpu`` is true if it is true in either.
+    If both carry a ``earthkit-workflows-anemoi`` entry, the automatically added one
+    is dropped in favour of the explicit one, so that the package is not pinned twice.
+    """
+    environment = list(dict.fromkeys([*first.environment, *second.environment]))
+    own = [e for e in environment if str(e).startswith(SELF_PACKAGE_NAME)]
+    if len(own) > 1:
+        automatic = _add_self_to_environment(["_"])[-1]
+        if automatic in own:
+            environment.remove(automatic)
+    return Requirements(environment=environment, needs_gpu=second.needs_gpu or first.needs_gpu)
+
+
+def _with_environment(
+    requirements: REQUIREMENTS | None, environment: ENVIRONMENT | None, keys: list[str]
+) -> REQUIREMENTS | None:
+    """
+    Convert the deprecated `environment` into `requirements`, so inner public APIs never see it.
+
+    Returns `requirements` unchanged if there is no `environment`, otherwise a new dict of
+    new `Requirements` keyed by `keys`. Does not warn.
+    """
+    if environment is None:
+        return requirements
+    return crack_requirements(requirements, keys, environment=environment)  # type: ignore[return-value]
 
 
 def _with_ensemble_dimension(action: fluent.Action) -> fluent.Action:
@@ -117,9 +158,10 @@ def _get_initial_conditions_source(
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         By default None.
     requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+        Already normalised requirements of the initial conditions stage, applied to every node created here.
+        Must not be shared with the caller, by default None
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required for the initial conditions, applied to every node created here, by default None
 
     Returns
     -------
@@ -196,9 +238,10 @@ def _run_model(
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+        Already normalised requirements of the inference stage, applied to every model node.
+        The model nodes always require a GPU. Must not be shared with the caller, by default None
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required for the model, applied to every model node, by default None
     kwargs : dict
         Additional arguments to pass to the runner
 
@@ -227,11 +270,13 @@ def _run_model(
     step_dimension = sorted(next(iter(expansion_qube.values())).axes()["step"], key=as_timedelta)
     expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
 
+    dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
+
+    # The expansion is inside the context too, as every node of the result carried the
+    # requirements and artifacts of the caller before they were applied per stage here.
     with fluent.NodeMetadataContext(requirements=requirements, artifacts=artifacts):
         model_results = input_state_source.map(model_payload, yields=("step", step_dimension))
-
-    dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
-    return model_results.expand_as_qube(dataset_qube)
+        return model_results.expand_as_qube(dataset_qube)
 
 
 def _default_dictionarify(obj: Any | dict[str, T | Any], expected_type: type[T]) -> dict[str, T]:
@@ -260,6 +305,7 @@ class Inference:
         environment: ENVIRONMENT | None = None,
         metadata: dict[str, Metadata] | None = None,
         expansion_qube: Qube | dict[str, Qube] | None = None,
+        requirements: REQUIREMENTS | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -271,17 +317,37 @@ class Inference:
             Lead time to run out to. Can be a string,
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         environment : ENVIRONMENT, optional
+            Deprecated, use `requirements`. Emits a `DeprecationWarning`.
             Environment to run the model in, by default None
+            If None, will use the current environment
+            Should be set to strings, as if used in pip install,
+            e.g. `["anemoi-models==0.3.1"]`
+            Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
+            to set the environment for each part of the run.
+            It is merged with `requirements`.
         metadata : dict[str, Metadata] | None, optional
             `anemoi.inference` multi metadata, if not given will be got from the checkpoint on disk, by default None
         expansion_qube : Qube | None, optional
             Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
+        requirements : REQUIREMENTS | None, optional
+            Execution requirements used by every run created from this object, by default None.
+            Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+            applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+            with `Requirements` or dicts as values. Missing stages get no requirements.
+            They are merged additively with the requirements given to the method that is called:
+            environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+            in any of them, so `False` cannot override `True`.
+            The model nodes always need a GPU.
         kwargs : dict
             Additional arguments to pass to the runner configuration
         """
+        if environment is not None:
+            warn_environment_deprecated("Inference")
         self.ckpt = ckpt
         self.lead_time = lead_time
         self.environment: ENVIRONMENT = environment if environment is not None else []
+        # Normalised once, `_requirements_for` merges them with the requirements of each call
+        self._constructor_requirements = crack_requirements(requirements, INFERENCE_STAGES, environment=environment)
 
         self._given_single_qube = isinstance(expansion_qube, Qube)
 
@@ -298,6 +364,11 @@ class Inference:
                 f"Cannot override checkpoint or keys set in the constructor: {set(kwargs.keys()) & {'checkpoint', *self.kwargs.keys()}}"
             )
         return {"checkpoint": self.ckpt, **self.kwargs, **kwargs}
+
+    def _requirements_for(self, requirements: REQUIREMENTS | None, keys: list[str]) -> dict[str, Requirements]:
+        """Merge the constructor requirements with those of one call, giving new `Requirements` per stage."""
+        given = crack_requirements(requirements, keys)
+        return {key: _merge_stage_requirements(self._constructor_requirements[key], given[key]) for key in keys}
 
     def _run_model(
         self,
@@ -327,7 +398,7 @@ class Inference:
         date: DATE,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
-        requirements: Requirements | None = None,
+        requirements: REQUIREMENTS | None = None,
         artifacts: Artifacts | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
@@ -345,10 +416,17 @@ class Inference:
             Ensemble members to run. An int selects one member, a sequence
             (e.g. `range(1, 51)`) selects several; 0 is the control member.
             None will run a single instance, by default None
-        requirements : Requirements | None, optional
-            Requirements for running the model, by default None
+        requirements : REQUIREMENTS | None, optional
+            Execution requirements, by default None.
+            Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+            applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+            with `Requirements` or dicts as values. Missing stages get no requirements.
+            They are merged additively with the requirements given to the constructor:
+            environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+            in any of them, so `False` cannot override `True`.
+            The model nodes always need a GPU.
         artifacts : Artifacts | None, optional
-            Artifacts required for the model, by default None
+            Artifacts required by the run, applied to every node created, by default None
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -364,32 +442,27 @@ class Inference:
         >>> inference.from_input("mars", date = "2021-01-01T00:00:00")
         """
         config = self._config(input=input, **kwargs)
-        environment_dict = crack_environment(
-            self.environment,
-            ["inference", "initial_conditions"],
-        )
+        stage_requirements = self._requirements_for(requirements, INFERENCE_STAGES)
 
         input_state_source = _get_initial_conditions_source(
             config=config,
             date=date,
             ensemble_members=ensemble_members,
-            requirements=Requirements(environment=environment_dict["initial_conditions"]),
+            requirements=stage_requirements["initial_conditions"],
+            artifacts=artifacts,
         )
 
-        with fluent.NodeMetadataContext(
-            requirements=requirements,
+        return self._run_model(
+            config,
+            input_state_source,
+            requirements=stage_requirements["inference"],
             artifacts=artifacts,
-        ):
-            return self._run_model(
-                config,
-                input_state_source,
-                requirements=Requirements(environment=environment_dict["inference"]),
-            )
+        )
 
     def from_initial_conditions(
         self,
         initial_conditions: dict[str, State] | None | fluent.Action | fluent.Payload | Callable,
-        requirements: Requirements | None = None,
+        requirements: REQUIREMENTS | None = None,
         artifacts: Artifacts | None = None,
         *,
         ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
@@ -406,10 +479,20 @@ class Inference:
             None creates a source node that yields None.
             If a fluent action and multiple ensemble member initial conditions
             are included, the dimension must be named `number`.
-        requirements : Requirements | None, optional
-            Requirements for running the model, by default None
+        requirements : REQUIREMENTS | None, optional
+            Execution requirements, by default None.
+            Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+            applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+            with `Requirements` or dicts as values. Missing stages get no requirements.
+            They are merged additively with the requirements given to the constructor:
+            environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+            in any of them, so `False` cannot override `True`.
+            The `initial_conditions` requirements only apply to the initial condition nodes
+            created here: the source nodes (when `initial_conditions` is not a fluent action)
+            and the ensemble member expansion.
+            The model nodes always need a GPU.
         artifacts : Artifacts | None, optional
-            Artifacts required for the model, by default None
+            Artifacts required by the run, applied to every node created, by default None
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
             Ensemble members to run. An int selects one member, a sequence
             (e.g. `range(1, 51)`) selects several; 0 is the control member.
@@ -433,56 +516,59 @@ class Inference:
         >>> inference.from_initial_conditions(init_conditions)
         """
         config = self._config(**kwargs)
-        environment_dict = crack_environment(self.environment, ["inference"])
+        stage_requirements = self._requirements_for(requirements, INFERENCE_STAGES)
 
-        if isinstance(initial_conditions, fluent.Action):
-            initial_conditions_source = initial_conditions
-        elif isinstance(initial_conditions, (Callable, fluent.Payload)):
-            initial_conditions_source = fluent.from_source([initial_conditions])  # type: ignore
-        else:
-            initial_conditions_source = fluent.from_source(
-                [fluent.create_task_instance(lambda: initial_conditions)],
-                dims=["date"],
-            )  # type: ignore
-
-        parsed_members = parse_ensemble_members(ensemble_members) if ensemble_members is not None else None
-        has_members, existing_members = _existing_ensemble_members(initial_conditions_source)
-
-        if has_members:
-            # Already exposed, e.g. by `get_initial_conditions`. Do not expose again.
-            if parsed_members is not None:
-                if existing_members is None:
-                    raise ValueError(
-                        f"`ensemble_members` {parsed_members} was given but the initial conditions have a "
-                        f"`{ENSEMBLE_DIMENSION_NAME}` dimension without coordinates, so its member ids cannot "
-                        f"be verified. Add `{ENSEMBLE_DIMENSION_NAME}` coordinates to the initial conditions "
-                        "or do not pass `ensemble_members`."
-                    )
-                if sorted(parsed_members) != existing_members:  # type: ignore[type-var]
-                    raise ValueError(
-                        f"`ensemble_members` {parsed_members} do not match the `{ENSEMBLE_DIMENSION_NAME}` "
-                        f"members of the initial conditions {existing_members}."
-                    )
-            # A scalar coordinate becomes a dimension of length 1
-            initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
-        elif parsed_members is not None:
-            initial_conditions_source = initial_conditions_source.transform(
-                faked_ensemble_transform,
-                [(member,) for member in parsed_members],
-                (ENSEMBLE_DIMENSION_NAME, parsed_members),  # type: ignore
-            )
-            # `transform` squeezes a single member, keep the dimension
-            initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
-
+        # Initial condition nodes created here (sources and ensemble expansion) get the
+        # `initial_conditions` stage; a given fluent action is used as is.
         with fluent.NodeMetadataContext(
-            requirements=requirements,
+            requirements=stage_requirements["initial_conditions"],
             artifacts=artifacts,
         ):
-            return self._run_model(
-                config,
-                initial_conditions_source,
-                requirements=Requirements(environment=environment_dict["inference"]),
-            )
+            if isinstance(initial_conditions, fluent.Action):
+                initial_conditions_source = initial_conditions
+            elif isinstance(initial_conditions, (Callable, fluent.Payload)):
+                initial_conditions_source = fluent.from_source([initial_conditions])  # type: ignore
+            else:
+                initial_conditions_source = fluent.from_source(
+                    [fluent.create_task_instance(lambda: initial_conditions)],
+                    dims=["date"],
+                )  # type: ignore
+
+            parsed_members = parse_ensemble_members(ensemble_members) if ensemble_members is not None else None
+            has_members, existing_members = _existing_ensemble_members(initial_conditions_source)
+
+            if has_members:
+                # Already exposed, e.g. by `get_initial_conditions`. Do not expose again.
+                if parsed_members is not None:
+                    if existing_members is None:
+                        raise ValueError(
+                            f"`ensemble_members` {parsed_members} was given but the initial conditions have a "
+                            f"`{ENSEMBLE_DIMENSION_NAME}` dimension without coordinates, so its member ids cannot "
+                            f"be verified. Add `{ENSEMBLE_DIMENSION_NAME}` coordinates to the initial conditions "
+                            "or do not pass `ensemble_members`."
+                        )
+                    if sorted(parsed_members) != existing_members:  # type: ignore[type-var]
+                        raise ValueError(
+                            f"`ensemble_members` {parsed_members} do not match the `{ENSEMBLE_DIMENSION_NAME}` "
+                            f"members of the initial conditions {existing_members}."
+                        )
+                # A scalar coordinate becomes a dimension of length 1
+                initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
+            elif parsed_members is not None:
+                initial_conditions_source = initial_conditions_source.transform(
+                    faked_ensemble_transform,
+                    [(member,) for member in parsed_members],
+                    (ENSEMBLE_DIMENSION_NAME, parsed_members),  # type: ignore
+                )
+                # `transform` squeezes a single member, keep the dimension
+                initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
+
+        return self._run_model(
+            config,
+            initial_conditions_source,
+            requirements=stage_requirements["inference"],
+            artifacts=artifacts,
+        )
 
 
 def from_config(
@@ -492,7 +578,7 @@ def from_config(
     date: DATE | None = None,
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     environment: ENVIRONMENT | None = None,
-    requirements: Requirements | None = None,
+    requirements: REQUIREMENTS | None = None,
     artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -512,16 +598,25 @@ def from_config(
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         None will run a single instance, by default None
     environment : ENVIRONMENT, optional
+        Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
-    requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+        It is merged with `requirements`.
+    requirements : REQUIREMENTS | None, optional
+        Execution requirements, by default None.
+        Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+        applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+        with `Requirements` or dicts as values. Missing stages get no requirements.
+        Requirements are merged additively, also with `environment`:
+        environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+        in any of them, so `False` cannot override `True`.
+        The model nodes always need a GPU.
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required by the run, applied to every node created, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -546,7 +641,9 @@ def from_config(
     except ImportError as e:
         raise ImportError("Using `from_config` requires `anemoi-inference` to be installed.") from e
 
-    environment = crack_environment(environment, ["inference", "initial_conditions"])
+    if environment is not None:
+        warn_environment_deprecated("from_config")
+    stage_requirements = crack_requirements(requirements, INFERENCE_STAGES, environment=environment)
     kwargs.update(overrides or {})
 
     if isinstance(config, os.PathLike):
@@ -567,23 +664,21 @@ def from_config(
         config=configuration,
         date=date or configuration.date,  # type: ignore
         ensemble_members=ensemble_members,
-        requirements=Requirements(environment=environment["initial_conditions"]),
+        requirements=stage_requirements["initial_conditions"],
+        artifacts=artifacts,
     )
 
-    with fluent.NodeMetadataContext(
-        requirements=requirements,
+    return _run_model(
+        expansion_qube_from_metadata(
+            _get_metadata(configuration.checkpoint),  # type: ignore[reportArgumentType]
+            as_timedelta(configuration.lead_time),
+        ),  # type: ignore
+        configuration,
+        input_state_source,
+        configuration.lead_time,
+        requirements=stage_requirements["inference"],
         artifacts=artifacts,
-    ):
-        return _run_model(
-            expansion_qube_from_metadata(
-                _get_metadata(configuration.checkpoint),  # type: ignore[reportArgumentType]
-                as_timedelta(configuration.lead_time),
-            ),  # type: ignore
-            configuration,
-            input_state_source,
-            configuration.lead_time,
-            requirements=Requirements(environment=environment["inference"]),
-        )
+    )
 
 
 def from_input(
@@ -596,7 +691,7 @@ def from_input(
     environment: ENVIRONMENT | None = None,
     metadata: dict[str, Metadata] | None = None,
     expansion_qube: Qube | dict[str, Qube] | None = None,
-    requirements: Requirements | None = None,
+    requirements: REQUIREMENTS | None = None,
     artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -620,20 +715,29 @@ def from_input(
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         None will run a single instance, by default None
     environment : ENVIRONMENT, optional
+        Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
         Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
         to set the environment for each part of the run.
+        It is merged with `requirements`.
     metadata : Optional[dict[str, Metadata]], optional
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     expansion_qube : Qube | dict[str, Qube] | None, optional
         Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
-    requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+    requirements : REQUIREMENTS | None, optional
+        Execution requirements, by default None.
+        Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+        applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+        with `Requirements` or dicts as values. Missing stages get no requirements.
+        Requirements are merged additively, also with `environment`:
+        environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+        in any of them, so `False` cannot override `True`.
+        The model nodes always need a GPU.
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required by the run, applied to every node created, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -647,10 +751,11 @@ def from_input(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_input
     >>> from_input("anemoi_model.ckpt", "mars", date = "2021-01-01T00:00:00", lead_time = "10D")
     """
+    if environment is not None:
+        warn_environment_deprecated("from_input")
     return Inference(
         ckpt,
         lead_time,
-        environment=environment,
         metadata=metadata,
         expansion_qube=expansion_qube,
         **kwargs,
@@ -658,7 +763,7 @@ def from_input(
         input,
         date,
         ensemble_members=ensemble_members,
-        requirements=requirements,
+        requirements=_with_environment(requirements, environment, INFERENCE_STAGES),
         artifacts=artifacts,
     )
 
@@ -672,7 +777,7 @@ def from_initial_conditions(
     environment: ENVIRONMENT | None = None,
     metadata: dict[str, Metadata] | None = None,
     expansion_qube: Qube | dict[str, Qube] | None = None,
-    requirements: Requirements | None = None,
+    requirements: REQUIREMENTS | None = None,
     artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -699,19 +804,32 @@ def from_initial_conditions(
         multiple ensemble members, this argument can be set to None,
         and the number of ensemble members will be inferred from the action.
         by default None.
-    environment : Optional[list[str]], optional
+    environment : ENVIRONMENT, optional
+        Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
         If None, will use the current environment
         Should be set to strings, as if used in pip install,
         e.g. `["anemoi-models==0.3.1"]`
+        Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
+        to set the environment for each part of the run.
+        It is merged with `requirements`.
     metadata : Optional[dict[str, Metadata]], optional
         `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
     expansion_qube : Qube | dict[str, Qube] | None, optional
         Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
-    requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+    requirements : REQUIREMENTS | None, optional
+        Execution requirements, by default None.
+        Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+        applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+        with `Requirements` or dicts as values. Missing stages get no requirements.
+        Requirements are merged additively, also with `environment`:
+        environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+        in any of them, so `False` cannot override `True`.
+        The `initial_conditions` requirements only apply to the source nodes created here
+        (when `initial_conditions` is not a fluent action).
+        The model nodes always need a GPU.
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required by the run, applied to every node created, by default None
     kwargs : dict
         Additional arguments to pass to the configuration
 
@@ -725,17 +843,18 @@ def from_initial_conditions(
     >>> from earthkit.workflows.plugins.anemoi.fluent import from_initial_conditions
     >>> from_initial_conditions("anemoi_model.ckpt", init_conditions, lead_time = "10D")
     """
+    if environment is not None:
+        warn_environment_deprecated("from_initial_conditions")
     return Inference(
         ckpt,
         lead_time,
-        environment=environment,
         metadata=metadata,
         expansion_qube=expansion_qube,
         **kwargs,
     ).from_initial_conditions(
         initial_conditions,
         ensemble_members=ensemble_members,
-        requirements=requirements,
+        requirements=_with_environment(requirements, environment, INFERENCE_STAGES),
         artifacts=artifacts,
     )
 
@@ -747,7 +866,7 @@ def get_initial_conditions(
     ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
     *,
     environment: ENVIRONMENT | None = None,
-    requirements: Requirements | None = None,
+    requirements: REQUIREMENTS | None = None,
     artifacts: Artifacts | None = None,
     **kwargs: Any,
 ) -> fluent.Action:
@@ -785,16 +904,24 @@ def get_initial_conditions(
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         By default, None, which retrieves the control member (0).
     environment : ENVIRONMENT, optional
+        Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the initial conditions retrieval in, by default None.
         If None, will use the current environment.
         Should be set to strings, as if used in pip install,
         e.g. ``["anemoi-models==0.3.1"]``.
         Can be ``dict[str, list[str]]`` with the key ``"initial_conditions"``
         to set the environment for the retrieval.
-    requirements : Requirements | None, optional
-        Requirements for running the model, by default None
+        It is merged with `requirements`.
+    requirements : REQUIREMENTS | None, optional
+        Execution requirements of the retrieval, by default None.
+        Either a single `Requirements` (or a dict of its fields, ``environment`` and ``needs_gpu``),
+        or a dict keyed by stage with `Requirements` or dicts as values, of which only
+        the ``initial_conditions`` stage is used here.
+        Requirements are merged additively, also with `environment`:
+        environments are joined (no ordering guarantee) and ``needs_gpu`` is true if it is true
+        in any of them, so ``False`` cannot override ``True``.
     artifacts : Artifacts | None, optional
-        Artifacts required for the model, by default None
+        Artifacts required by the retrieval, applied to every node created, by default None
     **kwargs : dict
         Additional arguments to pass to the run configuration
         (e.g. extra input overrides).
@@ -829,17 +956,17 @@ def get_initial_conditions(
     """
     config = {"checkpoint": ckpt, "input": input, **kwargs}
 
-    environment_dict = crack_environment(environment, ["initial_conditions"])
-    with fluent.NodeMetadataContext(
-        requirements=requirements,
+    if environment is not None:
+        warn_environment_deprecated("get_initial_conditions")
+    stage_requirements = crack_requirements(requirements, ["initial_conditions"], environment=environment)
+
+    return _get_initial_conditions_source(
+        config=config,
+        date=date,
+        ensemble_members=ensemble_members,
+        requirements=stage_requirements["initial_conditions"],
         artifacts=artifacts,
-    ):
-        return _get_initial_conditions_source(
-            config=config,
-            date=date,
-            ensemble_members=ensemble_members,
-            requirements=Requirements(environment=environment_dict["initial_conditions"]),
-        )
+    )
 
 
 class Action(fluent.Action):
@@ -854,7 +981,7 @@ class Action(fluent.Action):
         metadata: dict[str, Metadata] | None = None,
         expansion_qube: Qube | dict[str, Qube] | None = None,
         environment: ENVIRONMENT | None = None,
-        requirements: Requirements | None = None,
+        requirements: REQUIREMENTS | None = None,
         artifacts: Artifacts | None = None,
         **kwargs,
     ) -> fluent.Action:
@@ -876,15 +1003,28 @@ class Action(fluent.Action):
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
         expansion_qube : Qube | dict[str, Qube] | None, optional
             Qube to expand the model by, if not given will be got from the metadata using `utils.expansion_qube_from_metadata`, by default None
-        environment : Optional[list[str]], optional
+        environment : ENVIRONMENT, optional
+            Deprecated, use `requirements`. Emits a `DeprecationWarning`.
             Environment to run the model in, by default None
             If None, will use the current environment
             Should be set to strings, as if used in pip install,
             e.g. `["anemoi-models==0.3.1"]`
-        requirements : Requirements | None, optional
-            Requirements for running the model, by default None
+            Can be dict[str, list[str]] with keys `inference` and `initial_conditions`
+            to set the environment for each part of the run.
+            It is merged with `requirements`.
+        requirements : REQUIREMENTS | None, optional
+            Execution requirements, by default None.
+            Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
+            applied to every stage, or a dict keyed by stage (`inference`, `initial_conditions`)
+            with `Requirements` or dicts as values. Missing stages get no requirements.
+            Requirements are merged additively, also with `environment`:
+            environments are joined (no ordering guarantee) and `needs_gpu` is true if it is true
+            in any of them, so `False` cannot override `True`.
+            The graph this is called on already exists, so only the `inference` requirements
+            apply to new nodes.
+            The model nodes always need a GPU.
         artifacts : Artifacts | None, optional
-            Artifacts required for the model, by default None
+            Artifacts required by the run, applied to every node created, by default None
         kwargs : dict
             Additional arguments to pass to the configuration
 
@@ -894,15 +1034,16 @@ class Action(fluent.Action):
         fluent.Action
             Cascade action of the model results
         """
+        if environment is not None:
+            warn_environment_deprecated("Action.infer")
         return from_initial_conditions(
             ckpt,
             self,
             lead_time,
             ensemble_members=ensemble_members,
-            environment=environment,
             metadata=metadata,
             expansion_qube=expansion_qube,
-            requirements=requirements,
+            requirements=_with_environment(requirements, environment, INFERENCE_STAGES),
             artifacts=artifacts,
             **kwargs,
         )
