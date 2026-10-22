@@ -177,11 +177,13 @@ def _run_model(
         requirements=Requirements(needs_gpu=True),
     )
 
-    step_dimension = next(iter(expansion_qube.values())).axes()["step"]
+    # Qube axes are unordered sets, but the runner yields states in chronological order,
+    # so the step coordinates must be sorted to label each yielded state correctly.
+    step_dimension = sorted(next(iter(expansion_qube.values())).axes()["step"], key=as_timedelta)
     expansion_qubes_no_step = {k: v.remove_by_key("step") for k, v in expansion_qube.items()}
 
     with fluent.NodeMetadataContext(requirements=requirements, artifacts=artifacts):
-        model_results = input_state_source.map(model_payload, yields=("step", list(step_dimension)))
+        model_results = input_state_source.map(model_payload, yields=("step", step_dimension))
 
     dataset_qube = reduce(or_, (f"dataset={ds}" / q for ds, q in expansion_qubes_no_step.items()))
     return model_results.expand_as_qube(dataset_qube)
@@ -470,7 +472,7 @@ def from_config(
         configuration = RunConfiguration(**config_dump)
     else:
         raise TypeError(
-            f"Invalid type for config: {type(config)}. " "Must be os.PathLike, dict[str, Any], or RunConfiguration."
+            f"Invalid type for config: {type(config)}. Must be os.PathLike, dict[str, Any], or RunConfiguration."
         )
 
     input_state_source = _get_initial_conditions_source(

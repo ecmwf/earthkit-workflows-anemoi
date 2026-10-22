@@ -249,9 +249,9 @@ def assert_payload_metadata(action: Action, expected: dict) -> None:
     for _, narray in nodetree_arrays(action.nodes):
         for node in np.atleast_1d(narray.values).flatten():
             for key, value in expected.items():
-                assert getattr(node.metadata.requirements, key) == value, (
-                    f"Node {node.name!r} missing metadata {key!r}={value!r}, " f"got {node.metadata.requirements}"
-                )
+                assert (
+                    getattr(node.metadata.requirements, key) == value
+                ), f"Node {node.name!r} missing metadata {key!r}={value!r}, got {node.metadata.requirements}"
 
 
 @fake_checkpoints
@@ -340,6 +340,31 @@ def test_from_initial_conditions_with_dict_metadata(dict_metadata: dict) -> None
         lead_time="1D",
     )
     assert_shape(action, {"step": 4, "param": 6})
+
+
+def test_step_coordinates_are_chronological(dict_metadata: dict) -> None:
+    """Step coordinates must follow the chronological order the runner yields states in."""
+    action = from_initial_conditions(
+        "non_existent.ckpt",
+        None,
+        metadata=dict_metadata,
+        date="2020-01-01",
+        lead_time="2D",
+    )
+    step_coords = []
+
+    def collect(node: DataTree | DataArray):
+        if "step" in node.coords:
+            step_coords.append(list(np.atleast_1d(node.coords["step"].values)))
+        if isinstance(node, DataTree):
+            for child in node.children:
+                collect(node[child])
+
+    collect(action.nodes)
+
+    assert step_coords
+    for steps in step_coords:
+        assert steps == [6, 12, 18, 24, 30, 36, 42, 48]
 
 
 def test_from_input_with_dict_metadata(dict_metadata: dict) -> None:
