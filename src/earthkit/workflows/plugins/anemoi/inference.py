@@ -53,14 +53,17 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
         return {}
 
     for key in runner.dataset_names:
-        dt = to_datetime(date)
+        dates = [to_datetime(date) + h for h in runner.checkpoint.multi_dataset_metadata[key].lagged]
+
         states[key] = runner._combine_states(
-            runner.prognostics_inputs[key].create_input_state(date=dt, **_mars_kwargs(runner.prognostics_inputs[key])),
+            runner.prognostics_inputs[key].create_input_state(
+                dates=dates, **_mars_kwargs(runner.prognostics_inputs[key])
+            ),
             runner.constant_forcings_inputs[key].create_input_state(
-                date=dt, **_mars_kwargs(runner.constant_forcings_inputs[key])
+                dates=dates, **_mars_kwargs(runner.constant_forcings_inputs[key])
             ),
             runner.dynamic_forcings_inputs[key].create_input_state(
-                date=dt, **_mars_kwargs(runner.dynamic_forcings_inputs[key])
+                dates=dates, **_mars_kwargs(runner.dynamic_forcings_inputs[key])
             ),
         )
         if number is not None:
