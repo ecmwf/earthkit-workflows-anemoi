@@ -33,7 +33,7 @@ For both workflow creation and local execution:
 
 This includes the optional runtime dependencies:
 
--  ``anemoi-inference>=0.7`` - Required for running inference tasks
+-  ``anemoi-inference~=0.13.0`` - Required for running inference tasks
 
 **************************
  Development Installation

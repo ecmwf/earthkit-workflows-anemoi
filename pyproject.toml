@@ -46,7 +46,7 @@ optional-dependencies.docs = [
   "sphinx-rtd-theme",
 ]
 optional-dependencies.runtime-inference = [
-  "anemoi-inference>=0.13",
+  "anemoi-inference~=0.13.0",
 ]
 optional-dependencies.tests = [
   "earthkit-workflows-anemoi[runtime-inference]",
