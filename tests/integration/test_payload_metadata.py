@@ -17,6 +17,8 @@ from earthkit.workflows.graph import serialise
 
 from earthkit.workflows.plugins.anemoi.fluent import from_input
 
+from .conftest import string_entrypoint
+
 pytestmark = pytest.mark.integration
 
 
@@ -36,12 +38,12 @@ class TestPayloadMetadataIntegration:
         graph = action.graph()
         anemoi_nodes_found = 0
         for node in graph.nodes():
-            p = node.payload
-            if p is not None and hasattr(p, "func") and isinstance(p.func, str):
+            func = string_entrypoint(node.payload)
+            if func is not None:
                 anemoi_nodes_found += 1
-                assert (
-                    "environment" in p.metadata
-                ), f"Node {node.name!r} with func {p.func!r} missing environment metadata"
+                assert node.payload.definition.environment == [
+                    "anemoi-inference~=0.11"
+                ], f"Node {node.name!r} with func {func!r} missing environment metadata"
         assert anemoi_nodes_found > 0, "No anemoi payload nodes found in graph"
 
     @fake_checkpoints
@@ -73,11 +75,12 @@ class TestPayloadMetadataIntegration:
         graph = action.graph()
         model_nodes_found = 0
         for node in graph.nodes():
-            p = node.payload
-            if p is not None and hasattr(p, "func") and isinstance(p.func, str) and "run_as_earthkit" in p.func:
+            func = string_entrypoint(node.payload)
+            if func is not None and "run_as_earthkit" in func:
                 model_nodes_found += 1
-                assert p.metadata.get("needs_gpu") is True, (
-                    f"Node {node.name!r} with func {p.func!r} should have needs_gpu=True "
-                    f"in metadata, got {p.metadata}"
+                needs_gpu = node.payload.definition.needs_gpu
+                assert needs_gpu is True, (
+                    f"Node {node.name!r} with func {func!r} should have needs_gpu=True "
+                    f"in its task definition, got {needs_gpu!r}"
                 )
         assert model_nodes_found > 0, "No run_as_earthkit nodes found in graph"
