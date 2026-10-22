@@ -17,15 +17,15 @@ from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
     "date, ensemble_members, shape",
     [
         ["2000-01-01", 1, {"date": 1}],
+        ["2000-01-01", 0, {"date": 1}],
+        ["2000-01-01", 10, {"date": 1}],
         ["2000-01-01", [2], {"date": 1}],
         ["2000-01-01", range(1, 2), {"date": 1}],
-        ["2000-01-01", 10, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
+        ["2000-01-01", range(1, 11), {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
         ["2000-01-01", range(10), {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
         ["2000-01-01", range(10, 20), {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", 10, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
-        ["2000-01-01", 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        ["2000-01-01", 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
-        [-1, 51, {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        ["2000-01-01", range(1, 52), {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
+        [-1, range(1, 52), {"date": 1, ENSEMBLE_DIMENSION_NAME: 51}],
     ],
 )
 def test_get_initial_conditions_action(mock_config, date, ensemble_members, shape):
@@ -42,9 +42,36 @@ def test_get_initial_conditions_action(mock_config, date, ensemble_members, shap
 
 
 @pytest.mark.parametrize(
+    "ensemble_members, expected",
+    [
+        [3, [3]],
+        [0, [0]],
+        [[3], [3]],
+        [range(2, 3), [2]],
+        [[0, 3], [0, 3]],
+        [range(1, 4), [1, 2, 3]],
+        [None, [0]],
+    ],
+)
+@pytest.mark.parametrize("config_kind", ["dict", "action"])
+def test_get_initial_conditions_keeps_number_dimension(ensemble_members, expected, config_kind):
+    """`number` is a real dimension, including for single members, for both config branches."""
+    from earthkit.workflows import fluent
+
+    config = {"checkpoint": "ckpt"}
+    if config_kind == "action":
+        config = fluent.from_source([config], dims=["config"])
+
+    action = _get_initial_conditions_source(config, "2000-01-01", ensemble_members)
+
+    assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == len(expected)
+    assert list(action.nodes.coords[ENSEMBLE_DIMENSION_NAME].values) == expected
+
+
+@pytest.mark.parametrize(
     "date, ensemble_members, shape",
     [
-        ["2000-01-01", 0, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
         ["2000-01-01", -1, {"date": 1, ENSEMBLE_DIMENSION_NAME: 10}],
     ],
 )

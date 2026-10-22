@@ -57,7 +57,7 @@ class TestDAGStructure:
             "dummy",
             date="2020-01-01",
             lead_time="1D",
-            ensemble_members=3,
+            ensemble_members=range(1, 4),
         )
         assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
         assert action.nodes.coords[ENSEMBLE_DIMENSION_NAME].size == 3
@@ -82,6 +82,6 @@ class TestDAGStructure:
     def test_inference_class_from_input(self, simple_ckpt_path):
         """Inference class should produce identical structure to module function."""
         inference = Inference(simple_ckpt_path, lead_time="1D")
-        action = inference.from_input("dummy", "2020-01-01", ensemble_members=2)
+        action = inference.from_input("dummy", "2020-01-01", ensemble_members=range(1, 3))
         assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
         assert action.nodes.coords[ENSEMBLE_DIMENSION_NAME].size == 2

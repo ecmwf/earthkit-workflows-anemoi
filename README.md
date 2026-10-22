@@ -72,7 +72,7 @@ from earthkit.workflows.plugins import anemoi as anemoi_workflows
 
 CKPT = {'huggingface': 'ecmwf/aifs-single-1.0'}
 
-model_action = anemoi_workflows.fluent.from_input(CKPT, 'mars', '2022-01-01T00:00', lead_time = '7D', ensemble_members=51)
+model_action = anemoi_workflows.fluent.from_input(CKPT, 'mars', '2022-01-01T00:00', lead_time = '7D', ensemble_members=range(1, 52))
 model_action
 
 ```
@@ -89,6 +89,6 @@ from earthkit.workflows import fluent
 SOURCE_NODES: fluent.Action
 CKPT = {'huggingface': 'ecmwf/aifs-single-1.0'}
 
-SOURCE_NODES.anemoi.infer(CKPT, lead_time = '7D', ensemble_members = 51)
+SOURCE_NODES.anemoi.infer(CKPT, lead_time = '7D', ensemble_members = range(1, 52))
 
 ```

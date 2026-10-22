@@ -24,38 +24,38 @@ STANDARD_INFERENCE_TESTS = [
     # Test inputs of ensembles
     [
         "simple",
-        2,
+        range(1, 3),
         {"date": "2020-01-01", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "simple",
-        8,
+        range(1, 9),
         {"date": "2020-01-01", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 8, "param": 6, "date": 1},
     ],
     [
         "simple",
-        8,
+        range(1, 9),
         {"date": "2020-01-01", "lead_time": "4D"},
         {"step": 16, ENSEMBLE_DIMENSION_NAME: 8, "param": 6, "date": 1},
     ],
     # Test different model configs
     [
         "simple",
-        2,
+        range(1, 3),
         {"date": "2020-01-01", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "surface",
-        2,
+        range(1, 3),
         {"date": "2020-01-01", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1},
     ],
     [
         "full_atmo",
-        2,
+        range(1, 3),
         {"date": "2020-01-01", "lead_time": "1D"},
         {"step": 4, ENSEMBLE_DIMENSION_NAME: 2, "param": 6, "date": 1, "level": 1},
     ],
@@ -200,9 +200,9 @@ def test_from_initial_conditions_from_action(ckpt, ensemble_members, kwargs, sha
     from earthkit.workflows import fluent
 
     init_conditions = fluent.from_source(
-        [None for _ in range(ensemble_members)],
+        [None for _ in ensemble_members],
         dims=[ENSEMBLE_DIMENSION_NAME],
-        coords={ENSEMBLE_DIMENSION_NAME: range(ensemble_members)},
+        coords={ENSEMBLE_DIMENSION_NAME: ensemble_members},
     )
     shape.pop("date", None)
 
@@ -226,9 +226,9 @@ def test_from_initial_conditions_from_infer(ckpt, ensemble_members, kwargs, shap
 
     init_conditions = Action(
         fluent.from_source(
-            [None for _ in range(ensemble_members)],
+            [None for _ in ensemble_members],
             dims=[ENSEMBLE_DIMENSION_NAME],
-            coords={ENSEMBLE_DIMENSION_NAME: range(ensemble_members)},
+            coords={ENSEMBLE_DIMENSION_NAME: ensemble_members},
         ).nodes
     )
     shape.pop("date", None)
@@ -375,7 +375,7 @@ def test_from_input_with_dict_metadata(dict_metadata: dict) -> None:
         metadata=dict_metadata,
         date="2020-01-01",
         lead_time="1D",
-        ensemble_members=1,
+        ensemble_members=range(1, 2),
     )
     assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: 1, "param": 6, "date": 1})
 
@@ -445,3 +445,233 @@ def test_expansion_qube_from_metadata_with_real_metadata() -> None:
     assert "step" in qube.axes()
     assert "param" in qube.axes()
     assert "levtype" in qube.axes()
+
+
+# --- ensemble_members on from_initial_conditions ---
+
+ENS_KWARGS = {"lead_time": "1D"}
+
+
+@pytest.fixture
+def captured_configs(monkeypatch) -> list:
+    """Record the run configuration given to the model run, calling through to the real function."""
+    from earthkit.workflows.plugins.anemoi import fluent as fluent_module
+
+    configs: list = []
+    original = fluent_module._run_model
+
+    def recording(expansion_qube, config, *args, **kwargs):
+        configs.append(config)
+        return original(expansion_qube, config, *args, **kwargs)
+
+    monkeypatch.setattr(fluent_module, "_run_model", recording)
+    return configs
+
+
+def _ens_source(members, scalar: bool = False):
+    """Initial conditions action, with `number` as a dim (or a scalar coordinate)."""
+    from earthkit.workflows import fluent
+
+    if scalar:
+        return fluent.from_source([None], dims=["date"], coords={ENSEMBLE_DIMENSION_NAME: members[0]})
+    return fluent.from_source(
+        [None for _ in members],
+        dims=[ENSEMBLE_DIMENSION_NAME],
+        coords={ENSEMBLE_DIMENSION_NAME: list(members)},
+    )
+
+
+def _ens_coords(action: Action) -> list:
+    return list(action.nodes.coords[ENSEMBLE_DIMENSION_NAME].values)
+
+
+def _ckpt() -> Path:
+    return (Path(__file__).parent / f"checkpoints/{SIMPLE_CKPT}.yaml").absolute()
+
+
+@pytest.mark.parametrize(
+    "ensemble_members, expected",
+    [
+        [3, [3]],
+        [0, [0]],
+        [[3], [3]],
+        [range(1, 4), [1, 2, 3]],
+        [[0, 2, 5], [0, 2, 5]],
+    ],
+)
+@fake_checkpoints
+def test_inference_from_initial_conditions_exposes_members(ensemble_members, expected):
+    """An action without `number` is expanded along it, single members keep a dim of length 1."""
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(None, ensemble_members=ensemble_members)
+
+    assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == len(expected)
+    assert _ens_coords(action) == expected
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_members_none_unchanged():
+    """None leaves an action without `number` without it."""
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(None)
+    assert ENSEMBLE_DIMENSION_NAME not in action.nodes.dims
+    assert ENSEMBLE_DIMENSION_NAME not in action.nodes.coords
+
+
+@pytest.mark.parametrize("members", [[1, 2, 3], [3], [0]])
+@pytest.mark.parametrize("given", [None, "same"])
+@fake_checkpoints
+def test_inference_from_initial_conditions_existing_number_not_exposed_again(members, given):
+    """An action which already has `number` (as from `get_initial_conditions`) is not exposed twice."""
+    init = _ens_source(members)
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(init, ensemble_members=None if given is None else members)
+
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == len(members)
+    assert _ens_coords(action) == members
+    assert_shape(action, {"step": 4, ENSEMBLE_DIMENSION_NAME: len(members), "param": 6})
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_existing_number_order_insensitive():
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(_ens_source([1, 2, 3]), ensemble_members=[3, 1, 2])
+    assert sorted(_ens_coords(action)) == [1, 2, 3]
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == 3
+
+
+@pytest.mark.parametrize("scalar", [False, True])
+@fake_checkpoints
+def test_inference_from_initial_conditions_stacked_after_get_initial_conditions(scalar):
+    """Stacking `get_initial_conditions` with `from_initial_conditions` does not double the dim."""
+    from earthkit.workflows.plugins.anemoi.fluent import get_initial_conditions
+
+    members = [3]
+    if scalar:
+        init = _ens_source(members, scalar=True)
+        assert ENSEMBLE_DIMENSION_NAME not in init.nodes.dims
+    else:
+        init = get_initial_conditions(_ckpt(), "dummy", "2020-01-01", ensemble_members=3)
+
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(init, ensemble_members=3)
+
+    # A single member is a real dimension of length 1 on the result
+    assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == 1
+    assert _ens_coords(action) == members
+
+
+@pytest.mark.parametrize(
+    "existing, given",
+    [
+        [[1, 2, 3], [1, 2]],
+        [[1, 2, 3], range(1, 5)],
+        [[1, 2, 3], 3],
+        [[3], 4],
+        [[3], [0]],
+        [[3], 0],
+    ],
+)
+@fake_checkpoints
+def test_inference_from_initial_conditions_member_mismatch_raises(existing, given):
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    with pytest.raises(ValueError, match="do not match"):
+        inference.from_initial_conditions(_ens_source(existing), ensemble_members=given)
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_scalar_coord_mismatch_raises():
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    with pytest.raises(ValueError, match="do not match"):
+        inference.from_initial_conditions(_ens_source([3], scalar=True), ensemble_members=[4])
+
+
+@pytest.mark.parametrize("given", [[3], 3, [0, 1]])
+@fake_checkpoints
+def test_inference_from_initial_conditions_number_without_coords_raises(given):
+    """Explicit members cannot be checked against a `number` dim without coordinates."""
+    from earthkit.workflows import fluent
+
+    init = fluent.from_source([None, None], dims=[ENSEMBLE_DIMENSION_NAME])
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    with pytest.raises(ValueError, match="without coordinates"):
+        inference.from_initial_conditions(init, ensemble_members=given)
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_number_without_coords_members_none():
+    """With no explicit members a `number` dim without coordinates is left as it is."""
+    from earthkit.workflows import fluent
+
+    init = fluent.from_source([None, None], dims=[ENSEMBLE_DIMENSION_NAME])
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    action = inference.from_initial_conditions(init)
+    assert action.nodes.sizes[ENSEMBLE_DIMENSION_NAME] == 2
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_ensemble_members_keyword_only():
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    with pytest.raises(TypeError):
+        inference.from_initial_conditions(None, None, None, [1, 2])  # type: ignore[misc]
+
+
+@fake_checkpoints
+def test_inference_from_initial_conditions_members_not_in_run_config(captured_configs):
+    inference = Inference(_ckpt(), lead_time=ENS_KWARGS["lead_time"])
+    inference.from_initial_conditions(None, ensemble_members=[1, 2])
+    assert len(captured_configs) == 1
+    assert "ensemble_members" not in captured_configs[0]
+
+
+@fake_checkpoints
+def test_module_from_initial_conditions_members_not_in_run_config(captured_configs):
+    action = from_initial_conditions(_ckpt(), None, ensemble_members=[1, 2], **ENS_KWARGS)
+    assert len(captured_configs) == 1
+    assert "ensemble_members" not in captured_configs[0]
+    assert _ens_coords(action) == [1, 2]
+
+
+@fake_checkpoints
+def test_from_initial_conditions_none_placeholder_labelling_tasks_execute():
+    """The labelling tasks of a `None` initial conditions placeholder run, and pass `None` through.
+
+    The member ids stay on the `number` dimension of the action.
+    """
+    from cascade.low.core import TaskDefinition
+
+    from earthkit.workflows.plugins.anemoi.utils import expose_ensemble_dimension
+
+    action = from_initial_conditions(_ckpt(), None, ensemble_members=[0, 3], **ENS_KWARGS)
+    assert _ens_coords(action) == [0, 3]
+
+    labelling = []
+    for node in action.graph().nodes():
+        definition = node.payload.definition
+        if definition.func is None:
+            continue
+        func = TaskDefinition.func_dec(definition.func)
+        if func is expose_ensemble_dimension:
+            labelling.append(node.payload)
+
+    # Upstream value of the initial conditions placeholder is `None`, the member is a static argument
+    assert sorted(payload.static_input_ps["1"] for payload in labelling) == [0, 3]
+    for payload in labelling:
+        func = TaskDefinition.func_dec(payload.definition.func)
+        assert func(None, payload.static_input_ps["1"]) is None
+
+
+@fake_checkpoints
+def test_action_infer_members_not_in_run_config(captured_configs):
+    action = _ens_source([1, 2, 3])
+    result = Action(action.nodes).infer(_ckpt(), ensemble_members=[1, 2, 3], **ENS_KWARGS)
+    assert len(captured_configs) == 1
+    assert "ensemble_members" not in captured_configs[0]
+    assert _ens_coords(result) == [1, 2, 3]
+
+    # Without members the number of members is inferred from the action
+    result = Action(action.nodes).infer(_ckpt(), **ENS_KWARGS)
+    assert "ensemble_members" not in captured_configs[1]
+    assert _ens_coords(result) == [1, 2, 3]

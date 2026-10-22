@@ -34,13 +34,16 @@ class TestParseEnsembleMembers:
     def test_none_returns_list_of_none(self):
         assert parse_ensemble_members(None) == [None]
 
-    def test_single_int(self):
+    def test_single_int_is_member_id(self):
         result = parse_ensemble_members(3)
-        assert result == [1, 2, 3]
+        assert result == [3]
 
     def test_single_int_one(self):
         result = parse_ensemble_members(1)
         assert result == [1]
+
+    def test_zero_is_control_member(self):
+        assert parse_ensemble_members(0) == [0]
 
     def test_sequence_passed_through(self):
         result = parse_ensemble_members([5, 10, 15])
@@ -50,12 +53,8 @@ class TestParseEnsembleMembers:
         result = parse_ensemble_members(range(1, 4))
         assert result == [1, 2, 3]
 
-    def test_zero_raises(self):
-        with pytest.raises(ValueError, match="greater than 0"):
-            parse_ensemble_members(0)
-
     def test_negative_raises(self):
-        with pytest.raises(ValueError, match="greater than 0"):
+        with pytest.raises(ValueError, match="must not be negative"):
             parse_ensemble_members(-1)
 
 
@@ -75,24 +74,31 @@ class TestExposeEnsembleDimension:
         result = expose_ensemble_dimension(state, None)
         assert ENSEMBLE_DIMENSION_NAME not in result["data"]
 
-    def test_mutates_input_dict(self):
-        """The function should mutate the dict in place and return it."""
+    def test_does_not_mutate_input_dict(self):
+        """The function should return a new dict and leave the input unchanged."""
         state = {"data": {"date": "2020-01-01"}}
         result = expose_ensemble_dimension(state, 1)
-        assert result is state
+        assert result is not state
+        assert result["data"] is not state["data"]
+        assert state == {"data": {"date": "2020-01-01"}}
 
     def test_non_dict_raises(self):
         with pytest.raises(AssertionError, match="dictionary"):
             expose_ensemble_dimension("not a dict", 1)
 
+    def test_none_placeholder_passed_through(self):
+        """`None` initial conditions are a graph placeholder, there is no state to label."""
+        assert expose_ensemble_dimension(None, 3) is None
+        assert expose_ensemble_dimension(None, None) is None
+
     def test_uses_constant_not_hardcoded(self):
         """Ensure the function uses the ENSEMBLE_DIMENSION_NAME constant."""
         state = {"data": {}}
-        expose_ensemble_dimension(state, 42)
-        assert ENSEMBLE_DIMENSION_NAME in state["data"]
+        result = expose_ensemble_dimension(state, 42)
+        assert ENSEMBLE_DIMENSION_NAME in result["data"]
         # If the constant were still 'ensemble_member', this would trivially pass.
         # The important test is that only ENSEMBLE_DIMENSION_NAME is set.
-        assert len([k for k in state["data"] if k in ("ensemble_member", "number")]) == 1
+        assert len([k for k in result["data"] if k in ("ensemble_member", "number")]) == 1
 
 
 # --- faked_ensemble_transform ---

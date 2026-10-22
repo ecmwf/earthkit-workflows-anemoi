@@ -65,7 +65,7 @@ class TestDataFlows:
             lead_time="1D",
             checkpoint=ckpt,
             input="dummy",
-            ensemble_members=3,
+            ensemble_members=range(1, 4),
         )
         assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
         assert action.nodes.coords[ENSEMBLE_DIMENSION_NAME].size == 3
@@ -211,7 +211,7 @@ class TestDataFlows:
     def test_from_initial_conditions_none_vs_action(self, simple_ckpt_path):
         """from_initial_conditions(None) and from_initial_conditions(action) should
         both produce valid graphs but with different source structures."""
-        action_none = from_initial_conditions(simple_ckpt_path, None, lead_time="1D", ensemble_members=2)
+        action_none = from_initial_conditions(simple_ckpt_path, None, lead_time="1D", ensemble_members=range(1, 3))
         init = fluent.from_source(
             [None, None],
             dims=[ENSEMBLE_DIMENSION_NAME],

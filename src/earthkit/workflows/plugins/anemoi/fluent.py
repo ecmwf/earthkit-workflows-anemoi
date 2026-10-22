@@ -28,7 +28,7 @@ from qubed import Qube
 from earthkit.workflows import fluent
 
 from .types import ENSEMBLE_DIMENSION_NAME
-from .utils import crack_environment, expansion_qube_from_metadata, parse_ensemble_members
+from .utils import crack_environment, expansion_qube_from_metadata, faked_ensemble_transform, parse_ensemble_members
 
 if TYPE_CHECKING:
     # anemoi-inference imports
@@ -41,6 +41,47 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 T = TypeVar("T")
 DEFAULT_DATASET_NAME = "data"
+
+
+def _with_ensemble_dimension(action: fluent.Action) -> fluent.Action:
+    """Ensure every node array of `action` has the ensemble dimension.
+
+    `Action.transform` squeezes singleton dimensions, leaving a scalar coordinate
+    for a single member. This promotes it back to a dimension of length 1.
+    Arrays which already have the dimension are untouched.
+    """
+    nodetree = {
+        path: (array if ENSEMBLE_DIMENSION_NAME in array.dims else array.expand_dims(ENSEMBLE_DIMENSION_NAME))
+        for path, array in fluent.nodetree_arrays(action.nodes)
+    }
+    return type(action)(fluent.nodetree_from_dict(nodetree))
+
+
+def _existing_ensemble_members(action: fluent.Action) -> tuple[bool, list[int] | None]:
+    """Ensemble members already present on an action, as a dimension or a scalar coordinate.
+
+    Parameters
+    ----------
+    action : fluent.Action
+        Action to inspect.
+
+    Returns
+    -------
+    tuple[bool, list[int] | None]
+        Whether the action has the ensemble dimension or coordinate, and its sorted
+        members, which are None if unknown (a dimension without coordinates).
+    """
+    found = False
+    unknown = False
+    members: set[int] = set()
+    for _, array in fluent.nodetree_arrays(action.nodes):
+        if ENSEMBLE_DIMENSION_NAME in array.coords:
+            found = True
+            members.update(int(m) for m in array.coords[ENSEMBLE_DIMENSION_NAME].values.flatten())
+        elif ENSEMBLE_DIMENSION_NAME in array.dims:
+            found = True
+            unknown = True
+    return found, (None if unknown or not found else sorted(members))
 
 
 def _get_metadata(ckpt: VALID_CKPT, *, metadata: dict[str, Metadata] | None = None) -> dict[str, Metadata]:
@@ -72,7 +113,9 @@ def _get_initial_conditions_source(
     date : str | tuple[int, int, int]
         Date to get initial conditions for
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to get, by default None
+        Ensemble members to get. An int selects one member, a sequence
+        (e.g. `range(1, 51)`) selects several; 0 is the control member.
+        By default None.
     requirements : Requirements | None, optional
         Requirements for running the model, by default None
     artifacts : Artifacts | None, optional
@@ -102,13 +145,15 @@ def _get_initial_conditions_source(
                 lambda x, *a: x.map(
                     fluent.create_task_instance(
                         "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
-                        static_input_ps=(fluent.Node.Index(0)),
+                        static_input_ps=(fluent.Node.Index(0),),
                         static_input_kw=dict(number=a[0], date=date),
                     )
                 ),
-                params=ens_members,
+                params=[(ens_mem,) for ens_mem in ens_members],
                 dim=(ENSEMBLE_DIMENSION_NAME, ens_members),
             )
+            # `transform` squeezes a single member, keep the dimension
+            init_conditions = _with_ensemble_dimension(init_conditions)
             init_conditions._add_dimension("date", [to_datetime(date)])
             return init_conditions
 
@@ -297,7 +342,9 @@ class Inference:
         date : DATE
             Date to get initial conditions for
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-            Number of ensemble members to run, None will run a single instance, by default None
+            Ensemble members to run. An int selects one member, a sequence
+            (e.g. `range(1, 51)`) selects several; 0 is the control member.
+            None will run a single instance, by default None
         requirements : Requirements | None, optional
             Requirements for running the model, by default None
         artifacts : Artifacts | None, optional
@@ -344,6 +391,8 @@ class Inference:
         initial_conditions: dict[str, State] | None | fluent.Action | fluent.Payload | Callable,
         requirements: Requirements | None = None,
         artifacts: Artifacts | None = None,
+        *,
+        ensemble_members: ENSEMBLE_MEMBER_SPECIFICATION | None = None,
         **kwargs: Any,
     ) -> fluent.Action:
         """
@@ -356,11 +405,19 @@ class Inference:
             Can be other fluent actions, payloads, a callable, a State, or None.
             None creates a source node that yields None.
             If a fluent action and multiple ensemble member initial conditions
-            are included, the dimension must be named `ensemble_member`.
+            are included, the dimension must be named `number`.
         requirements : Requirements | None, optional
             Requirements for running the model, by default None
         artifacts : Artifacts | None, optional
             Artifacts required for the model, by default None
+        ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
+            Ensemble members to run. An int selects one member, a sequence
+            (e.g. `range(1, 51)`) selects several; 0 is the control member.
+            If the initial conditions already have the `number` dimension (or
+            a scalar `number` coordinate) it is not exposed again, and a
+            `ValueError` is raised if its members differ from this argument.
+            If they do not and this is not None, the initial conditions are
+            expanded along `number`. None leaves them unchanged. By default None.
         kwargs : dict
             Additional arguments to pass to the runner configuration
 
@@ -387,6 +444,35 @@ class Inference:
                 [fluent.create_task_instance(lambda: initial_conditions)],
                 dims=["date"],
             )  # type: ignore
+
+        parsed_members = parse_ensemble_members(ensemble_members) if ensemble_members is not None else None
+        has_members, existing_members = _existing_ensemble_members(initial_conditions_source)
+
+        if has_members:
+            # Already exposed, e.g. by `get_initial_conditions`. Do not expose again.
+            if parsed_members is not None:
+                if existing_members is None:
+                    raise ValueError(
+                        f"`ensemble_members` {parsed_members} was given but the initial conditions have a "
+                        f"`{ENSEMBLE_DIMENSION_NAME}` dimension without coordinates, so its member ids cannot "
+                        f"be verified. Add `{ENSEMBLE_DIMENSION_NAME}` coordinates to the initial conditions "
+                        "or do not pass `ensemble_members`."
+                    )
+                if sorted(parsed_members) != existing_members:  # type: ignore[type-var]
+                    raise ValueError(
+                        f"`ensemble_members` {parsed_members} do not match the `{ENSEMBLE_DIMENSION_NAME}` "
+                        f"members of the initial conditions {existing_members}."
+                    )
+            # A scalar coordinate becomes a dimension of length 1
+            initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
+        elif parsed_members is not None:
+            initial_conditions_source = initial_conditions_source.transform(
+                faked_ensemble_transform,
+                [(member,) for member in parsed_members],
+                (ENSEMBLE_DIMENSION_NAME, parsed_members),  # type: ignore
+            )
+            # `transform` squeezes a single member, keep the dimension
+            initial_conditions_source = _with_ensemble_dimension(initial_conditions_source)
 
         with fluent.NodeMetadataContext(
             requirements=requirements,
@@ -422,7 +508,9 @@ def from_config(
     date : Optional[DATE], optional
         Specific override for date, by default None
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
-        Number of ensemble members to run, None will run a single instance, by default None
+        Ensemble members to run. An int selects one member, a sequence
+        (e.g. `range(1, 51)`) selects several; 0 is the control member.
+        None will run a single instance, by default None
     environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
@@ -528,7 +616,9 @@ def from_input(
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to run, None will run a single instance, by default None
+        Ensemble members to run. An int selects one member, a sequence
+        (e.g. `range(1, 51)`) selects several; 0 is the control member.
+        None will run a single instance, by default None
     environment : ENVIRONMENT, optional
         Environment to run the model in, by default None
         If None, will use the current environment
@@ -598,12 +688,13 @@ def from_initial_conditions(
         Can be other fluent actions, payloads, a callable, a State, or None.
         None creates a source node that yields None.
         If a fluent action and multiple ensemble member initial conditions
-        are included, the dimension must be named `ensemble_member`.
+        are included, the dimension must be named `number`.
     lead_time : LEAD_TIME
         Lead time to run out to. Can be a string,
         i.e. `1H`, `1D`, int, or a datetime.timedelta
     ensemble_members : Optional[ENSEMBLE_MEMBER_SPECIFICATION], optional
-        Number of ensemble members to run,
+        Ensemble members to run. An int selects one member, a sequence
+        (e.g. `range(1, 51)`) selects several; 0 is the control member.
         If initial_conditions is a fluent action, with
         multiple ensemble members, this argument can be set to None,
         and the number of ensemble members will be inferred from the action.
@@ -690,9 +781,9 @@ def get_initial_conditions(
         an ISO 8601 string (e.g. ``"2021-01-01T00:00:00"``), or a
         ``(year, month, day)`` tuple.
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
-        Number of ensemble members to retrieve, or specification of which members to retrieve.
-        This can be set to None to retrieve a single member, or to a specification (e.g. an int for number of members, or a list of member identifiers) to retrieve multiple members.
-        By default, None (retrieves a single member if supported).
+        Ensemble members to retrieve. An int selects one member, a sequence
+        (e.g. `range(1, 51)`) selects several; 0 is the control member.
+        By default, None, which retrieves the control member (0).
     environment : ENVIRONMENT, optional
         Environment to run the initial conditions retrieval in, by default None.
         If None, will use the current environment.
@@ -778,7 +869,9 @@ class Action(fluent.Action):
             Lead time to run out to. Can be a string,
             i.e. `1H`, `1D`, int, or a datetime.timedelta
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION | None, optional
-            Number of ensemble members to run, If set to None, the number of ensemble members will be inferred from the action. by default None.
+            Ensemble members to run. An int selects one member, a sequence
+            (e.g. `range(1, 51)`) selects several; 0 is the control member.
+            If set to None, the number of ensemble members will be inferred from the action. by default None.
         metadata : dict[str, Metadata] | None, optional
             `anemoi.inference` metadata, if not given will be got from the checkpoint on disk, by default None
         expansion_qube : Qube | dict[str, Qube] | None, optional
