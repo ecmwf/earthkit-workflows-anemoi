@@ -42,10 +42,10 @@ This installs only the core dependencies needed to define and serialize workflow
 To both create and execute workflows locally:
 
 ```bash
-pip install 'earthkit-workflows-anemoi[runtime]'
+pip install 'earthkit-workflows-anemoi[runtime-inference]'
 ```
 
-This includes `anemoi-inference` and `anemoi-datasets` required for local execution.
+This includes `anemoi-inference`, required for local execution.
 
 ### For development
 

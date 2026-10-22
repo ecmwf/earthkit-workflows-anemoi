@@ -80,10 +80,6 @@ intersphinx_mapping = {
         "https://anemoi-utils.readthedocs.io/en/latest/",
         ("../../anemoi-utils/docs/_build/html/objects.inv", None),
     ),
-    "anemoi-datasets": (
-        "https://anemoi-datasets.readthedocs.io/en/latest/",
-        ("../../anemoi-datasets/docs/_build/html/objects.inv", None),
-    ),
     "anemoi-inference": (
         "https://anemoi-inference.readthedocs.io/en/latest/",
         ("../../anemoi-inference/docs/_build/html/objects.inv", None),
@@ -121,7 +117,6 @@ autodoc_member_order = "bysource"  # Keep file order
 # Mock imports for optional dependencies (runtime group)
 autodoc_mock_imports = [
     "anemoi.inference",
-    "anemoi.datasets",
 ]
 
 # https://autodoc-pydantic.readthedocs.io/en/stable/users/configuration.html
