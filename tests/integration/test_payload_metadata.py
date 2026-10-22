@@ -41,9 +41,13 @@ class TestPayloadMetadataIntegration:
             func = string_entrypoint(node.payload)
             if func is not None:
                 anemoi_nodes_found += 1
-                assert node.payload.definition.environment == [
+                environment = node.payload.definition.environment
+                # Release versions of this package add themselves to the environment
+                # (see `utils.add_self_to_environment`); development versions do not.
+                user_environment = [e for e in environment if not str(e).startswith("earthkit-workflows-anemoi")]
+                assert user_environment == [
                     "anemoi-inference~=0.11"
-                ], f"Node {node.name!r} with func {func!r} missing environment metadata"
+                ], f"Node {node.name!r} with func {func!r} missing environment metadata, got {environment!r}"
         assert anemoi_nodes_found > 0, "No anemoi payload nodes found in graph"
 
     @fake_checkpoints
