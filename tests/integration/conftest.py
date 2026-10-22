@@ -27,7 +27,8 @@ import pytest
 import yaml
 from anemoi.inference.testing import fake_checkpoints
 from anemoi.inference.testing.mock_checkpoint import MockRunConfiguration
-from earthkit.workflows.fluent import Action, Payload, nodetree_arrays
+from cascade.low.core import TaskDefinition, TaskInstance
+from earthkit.workflows.fluent import Action, nodetree_arrays
 from earthkit.workflows.graph import Node, Output, serialise
 
 # ---------------------------------------------------------------------------
@@ -45,35 +46,57 @@ def collect_payloads(action):
     return payloads
 
 
+def string_entrypoint(payload) -> str | None:
+    """Return the dotted function path of a string-referenced task payload.
+
+    Since earthkit-workflows 0.17 node payloads are ``TaskInstance`` objects.
+    A string-referenced function is stored in ``definition.entrypoint`` (with
+    ``definition.func`` unset); a callable is stored encoded in
+    ``definition.func`` (with an empty ``entrypoint``). Returns None for
+    anything that is not a string-referenced task.
+    """
+    if not isinstance(payload, TaskInstance):
+        return None
+    definition = payload.definition
+    if definition.func is None and definition.entrypoint:
+        return definition.entrypoint
+    return None
+
+
+def payload_func_label(payload) -> str | None:
+    """Return a label for a task payload's function: dotted path or callable qualname."""
+    if not isinstance(payload, TaskInstance):
+        return None
+    entrypoint = string_entrypoint(payload)
+    if entrypoint is not None:
+        return entrypoint
+    if payload.definition.func is not None:
+        func = TaskDefinition.func_dec(payload.definition.func)
+        return getattr(func, "__qualname__", None)
+    return None
+
+
 def collect_graph_payload_funcs(action):
-    """Collect all unique payload function paths from an action's full graph.
+    """Collect all unique string-referenced payload function paths from an action's full graph.
 
     Uses graph.nodes() to get ALL nodes including intermediate ones
     (not just the leaf nodes exposed by nodetree_arrays).
     """
     funcs = set()
-    graph = action.graph()
-    for node in graph.nodes():
-        p = node.payload
-        if p is not None and hasattr(p, "func"):
-            f = p.func
-            if isinstance(f, str):
-                funcs.add(f)
+    for node in action.graph().nodes():
+        entrypoint = string_entrypoint(node.payload)
+        if entrypoint is not None:
+            funcs.add(entrypoint)
     return funcs
 
 
 def collect_graph_payload_func_labels(action):
-    """Collect all payload function labels (strings or qualnames) from the full graph."""
+    """Collect all payload function labels (dotted paths or qualnames) from the full graph."""
     labels = set()
-    graph = action.graph()
-    for node in graph.nodes():
-        p = node.payload
-        if p is not None and hasattr(p, "func"):
-            f = p.func
-            if isinstance(f, str):
-                labels.add(f)
-            elif hasattr(f, "__qualname__"):
-                labels.add(f.__qualname__)
+    for node in action.graph().nodes():
+        label = payload_func_label(node.payload)
+        if label is not None:
+            labels.add(label)
     return labels
 
 
@@ -238,9 +261,14 @@ class SimpleGraphExecutor:
             self.results[node.name] = None
             return None
 
-        if isinstance(payload, Payload):
-            func = payload.func
-            func_key = func if isinstance(func, str) else getattr(func, "__qualname__", str(func))
+        if isinstance(payload, TaskInstance):
+            definition = payload.definition
+            if definition.func is not None:
+                func = TaskDefinition.func_dec(definition.func)
+                func_key = getattr(func, "__qualname__", str(func))
+            else:
+                func = definition.entrypoint
+                func_key = func
 
             # Check mock registry
             if func_key in self.mock_registry:
@@ -248,21 +276,16 @@ class SimpleGraphExecutor:
             else:
                 func = _resolve_func(func)
 
-            # Build args, replacing Node.input_name references with actual values
-
+            # Build positional args: Node.__init__ stores None at the position of
+            # each input node and registers that input under the position's name.
             args = []
-            for arg in payload.args:
-                if isinstance(arg, str) and arg.startswith("input"):
-                    # This is a reference to an input node
-                    matching = [v for k, v in input_values.items()]
-                    if matching:
-                        args.append(matching[0])
-                    else:
-                        args.append(arg)
+            for pos in sorted(payload.static_input_ps, key=int):
+                if pos in input_values:
+                    args.append(input_values[pos])
                 else:
-                    args.append(arg)
+                    args.append(payload.static_input_ps[pos])
 
-            kwargs = dict(payload.kwargs)
+            kwargs = dict(payload.static_input_kw)
 
             try:
                 result = func(*args, **kwargs)

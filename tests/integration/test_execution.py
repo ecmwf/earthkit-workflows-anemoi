@@ -24,6 +24,8 @@ from anemoi.inference.testing import fake_checkpoints
 from earthkit.workflows.plugins.anemoi.fluent import from_input
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
+from .conftest import string_entrypoint
+
 pytestmark = pytest.mark.integration
 
 
@@ -38,13 +40,10 @@ class TestExecution:
 
         anemoi_funcs_found = set()
         for node in graph.nodes():
-            p = node.payload
-            if p is None or not hasattr(p, "func"):
-                continue
-            if not isinstance(p.func, str):
+            func_path = string_entrypoint(node.payload)
+            if func_path is None:
                 continue
 
-            func_path = p.func
             anemoi_funcs_found.add(func_path)
             # Verify the mock exists
             assert func_path in mock_registry, f"No mock registered for {func_path}"
