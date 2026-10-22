@@ -38,11 +38,12 @@ def _grib_metadata(ensemble_member: int | None) -> dict:
     """GRIB encoding metadata for a given ensemble member.
 
     Member 0 is the control forecast (type cf), members above 0 are perturbed
-    forecasts (type pf), and None means a non-ensemble forecast.
+    forecasts (type pf), and None means a deterministic forecast (stream oper, type fc).
     """
     grib_metadata: dict = {
         "edition": 2,
         "type": "fc",
+        "stream": "oper",
         "class": "ai",
     }
     if ensemble_member is not None:

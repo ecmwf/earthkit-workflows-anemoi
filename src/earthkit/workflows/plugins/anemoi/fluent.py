@@ -156,7 +156,9 @@ def _get_initial_conditions_source(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Ensemble members to get. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        By default None.
+        None is a deterministic run: the initial conditions are fetched with
+        `number=None` (the configured, e.g. oper analysis, request) and the
+        action has no `number` dimension. By default None.
     requirements : Requirements | None, optional
         Already normalised requirements of the initial conditions stage, applied to every node created here.
         Must not be shared with the caller, by default None
@@ -175,7 +177,29 @@ def _get_initial_conditions_source(
         config_dict = config
 
     if ensemble_members is None:
-        ensemble_members = [0]
+        # Deterministic run, one task per date with no `number` dimension.
+        with fluent.NodeMetadataContext(requirements=requirements, artifacts=artifacts):
+            if isinstance(config_dict, fluent.Action):
+                init_conditions = config_dict.map(
+                    fluent.create_task_instance(
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                        static_input_ps=(fluent.Node.Index(0),),
+                        static_input_kw=dict(number=None, date=date),
+                    )
+                )
+                init_conditions._add_dimension("date", [to_datetime(date)])
+                return init_conditions
+
+            return fluent.from_source(
+                [
+                    fluent.create_task_instance(
+                        "earthkit.workflows.plugins.anemoi.inference._get_initial_conditions",
+                        static_input_ps=(),
+                        static_input_kw=dict(config=config_dict, date=date, number=None),
+                    )
+                ],  # type: ignore
+                coords={"date": [to_datetime(date)]},
+            )
 
     ens_members = parse_ensemble_members(ensemble_members)
 
@@ -415,7 +439,8 @@ class Inference:
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
             Ensemble members to run. An int selects one member, a sequence
             (e.g. `range(1, 51)`) selects several; 0 is the control member.
-            None will run a single instance, by default None
+            None is a deterministic run (oper analysis initial conditions, no
+            `number` dimension, output written as stream oper, type fc), by default None
         requirements : REQUIREMENTS | None, optional
             Execution requirements, by default None.
             Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
@@ -596,7 +621,8 @@ def from_config(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
         Ensemble members to run. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        None will run a single instance, by default None
+        None is a deterministic run (oper analysis initial conditions, no
+        `number` dimension, output written as stream oper, type fc), by default None
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
@@ -713,7 +739,8 @@ def from_input(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Ensemble members to run. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        None will run a single instance, by default None
+        None is a deterministic run (oper analysis initial conditions, no
+        `number` dimension, output written as stream oper, type fc), by default None
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
@@ -902,7 +929,9 @@ def get_initial_conditions(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Ensemble members to retrieve. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        By default, None, which retrieves the control member (0).
+        By default, None, a deterministic run: the initial conditions are fetched
+        with `number=None` (oper analysis) and there is no `number` dimension.
+        Use 0 for the control member.
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the initial conditions retrieval in, by default None.

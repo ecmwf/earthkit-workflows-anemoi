@@ -11,7 +11,7 @@ from earthkit.workflows.plugins.anemoi.runner import _grib_metadata
 
 
 def test_grib_metadata_no_member():
-    assert _grib_metadata(None) == {"edition": 2, "type": "fc", "class": "ai"}
+    assert _grib_metadata(None) == {"edition": 2, "type": "fc", "stream": "oper", "class": "ai"}
 
 
 def test_grib_metadata_control_member():
