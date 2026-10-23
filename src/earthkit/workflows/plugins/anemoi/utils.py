@@ -10,20 +10,22 @@
 
 import functools
 import operator
-from collections.abc import Sequence
+import warnings
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from anemoi.utils.dates import frequency_to_seconds
+from earthkit.workflows.metadata import Requirements
 from qubed import Qube
 
 from earthkit.workflows import fluent
 
-from .types import ENSEMBLE_DIMENSION_NAME, ENVIRONMENT
+from .types import ENSEMBLE_DIMENSION_NAME, ENVIRONMENT, STAGES
 
 if TYPE_CHECKING:
     from anemoi.inference.metadata import Metadata
 
-    from .types import ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME
+    from .types import ENSEMBLE_MEMBER_SPECIFICATION, ENVIRONMENT, LEAD_TIME, REQUIREMENTS
 
 E = TypeVar("E", bound=ENVIRONMENT)
 
@@ -305,23 +307,32 @@ def _add_self_to_environment(environment: E) -> E:
     """
     Add earthkit-workflows-anemoi to the environment list.
 
+    The input is never modified, a new list (or dict of new lists) is returned.
+
     Parameters
     ----------
     environment : list[str] | dict[str, list[str]]
-        Environment list to add self in place to
+        Environment list, or dict of environment lists, to add self to
 
     Returns
     -------
     list[str] | dict[str, list[str]]
-        Environment list with self added
+        New environment list with self added
     """
     from . import __version__ as version
+
+    def copy_environment(env: Any) -> Any:
+        if isinstance(env, list):
+            return list(env)
+        if isinstance(env, dict):
+            return {key: list(value) for key, value in env.items()}
+        return env
 
     if version.split(".")[-1].startswith("dev"):
         # If the version is a development version, ignore it
         # such that it is not overwritten
         # e.g. "0.3.1.dev0" -> "0.3"
-        return environment
+        return copy_environment(environment)
 
     version = ".".join(version.split(".")[:3])  # Ensure version is in x.y.z format
 
@@ -335,26 +346,158 @@ def _add_self_to_environment(environment: E) -> E:
 
         if any(str(e).startswith(package_name) for e in env_list):
             # If the environment already contains the self variable, return it as is
-            return env_list
+            return list(env_list)
 
-        env_list.append(self_var)
-        return env_list
+        return [*env_list, self_var]
 
     if isinstance(environment, list):
-        environment = add_self_to_list(environment)
-    elif isinstance(environment, dict):
-        for key in environment:
-            environment[key] = add_self_to_list(environment[key])
+        return add_self_to_list(environment)
+    if isinstance(environment, dict):
+        return {key: add_self_to_list(value) for key, value in environment.items()}
     return environment
 
 
-def crack_environment(environment: ENVIRONMENT | None, keys: list[str]) -> dict[str, list[str]]:
-    """Crack the environment into a dictionary of lists."""
+def _split_environment(environment: "ENVIRONMENT | None", keys: Sequence[str]) -> dict[str, list[str]]:
+    """Split the environment into a dictionary of new lists, one per key, without adding self."""
     if environment is None:
-        return _add_self_to_environment({k: [] for k in keys})
+        return {k: [] for k in keys}
     elif isinstance(environment, list):
-        return _add_self_to_environment({k: environment for k in keys})
+        return {k: list(environment) for k in keys}
     elif isinstance(environment, dict):
-        return _add_self_to_environment({k: environment.get(k, []) for k in keys})
+        return {k: list(environment.get(k, [])) for k in keys}
     else:
         raise TypeError(f"Invalid type for environment: {type(environment)}. Must be list or dict.")
+
+
+def crack_environment(environment: ENVIRONMENT | None, keys: list[str]) -> dict[str, list[str]]:
+    """Crack the environment into a dictionary of lists.
+
+    Every returned list is a new object, the input is never modified and no list is shared
+    between keys. Self is added to each non-empty list, see `_add_self_to_environment`.
+    """
+    return _add_self_to_environment(_split_environment(environment, keys))
+
+
+def warn_environment_deprecated(func_name: str, stacklevel: int = 3) -> None:
+    """Warn that the `environment` argument is deprecated in favour of `requirements`.
+
+    Parameters
+    ----------
+    func_name : str
+        Name of the public function or method that received `environment`.
+    stacklevel : int, optional
+        Passed on to `warnings.warn`. With the default of 3 the warning is attributed to the
+        caller of the function that calls this helper, i.e. the user's line.
+    """
+    warnings.warn(
+        f"The `environment` argument of `{func_name}` is deprecated and will be removed in a future release. "
+        "Use `requirements=Requirements(environment=...)`, or a dict of requirements keyed by stage "
+        f"({', '.join(STAGES)}), instead.",
+        DeprecationWarning,
+        stacklevel=stacklevel,
+    )
+
+
+def _as_requirements(value: "Requirements | Mapping[str, Any] | None", what: str) -> Requirements:
+    """Return a new `Requirements` from a `Requirements`, a mapping of its fields or None."""
+    if value is None:
+        return Requirements()
+    if isinstance(value, Requirements):
+        return Requirements(environment=list(value.environment), needs_gpu=value.needs_gpu)
+    if isinstance(value, Mapping):
+        return Requirements(**value)
+    raise TypeError(f"Invalid type for {what}: {type(value)}. Must be Requirements or a dict of its fields.")
+
+
+def _merge_requirements(into: Requirements, other: Requirements) -> None:
+    """Merge `other` into `into` in place, matching `earthkit.workflows.metadata.update_requirements`.
+
+    The environment is the union of both (order is not significant) and `needs_gpu` is `other or into`.
+    """
+    into.environment = list(dict.fromkeys([*into.environment, *other.environment]))
+    into.needs_gpu = other.needs_gpu or into.needs_gpu
+
+
+def crack_requirements(
+    requirements: "REQUIREMENTS | None",
+    keys: Sequence[str],
+    *,
+    environment: "ENVIRONMENT | None" = None,
+) -> dict[str, Requirements]:
+    """Normalise execution requirements into one `Requirements` per stage.
+
+    Parameters
+    ----------
+    requirements : REQUIREMENTS | None
+        One of
+
+        - None, meaning no requirements.
+        - A `Requirements`, or a dict of its fields (``environment``, ``needs_gpu``).
+          It is applied to every stage in `keys`.
+        - A mapping keyed by stage (see `STAGES`), with `Requirements` or dicts of its
+          fields as values. Stages missing from the mapping get empty requirements.
+          Valid stages not in `keys` are ignored.
+
+        An empty dict is treated as no requirements.
+    keys : Sequence[str]
+        The stages to return requirements for.
+    environment : list[str] | dict[str, list[str]] | None, optional
+        Deprecated, use `requirements`. A list is applied to every stage in `keys`, a dict is
+        keyed by stage. It is merged into `requirements`.
+
+    Returns
+    -------
+    dict[str, Requirements]
+        New `Requirements` for each key in `keys`. No object is shared between keys or with
+        the inputs, and the inputs are never modified. ``earthkit-workflows-anemoi`` is added
+        to the environment of each stage whose environment is not empty, unless it already
+        contains an ``earthkit-workflows-anemoi`` entry.
+
+    Raises
+    ------
+    ValueError
+        If `requirements` is a dict with unknown keys, or keys that mix `Requirements` fields
+        and stage names, or stage names not in `STAGES`.
+    TypeError
+        If `requirements`, one of its values, or `environment` has an invalid type.
+
+    Notes
+    -----
+    Requirements are merged additively, as `earthkit.workflows.metadata.update_requirements`
+    does for nodes: the environment is the union of all packages (order is not guaranteed) and
+    ``needs_gpu`` is true if it is true in any of them. ``False`` cannot override ``True``.
+    """
+    fields = set(Requirements.model_fields)
+    result: dict[str, Requirements]
+
+    if requirements is None:
+        result = {k: Requirements() for k in keys}
+    elif isinstance(requirements, Requirements):
+        result = {k: _as_requirements(requirements, "requirements") for k in keys}
+    elif isinstance(requirements, Mapping):
+        given = set(requirements)
+        if not given:
+            result = {k: Requirements() for k in keys}
+        elif given <= fields:
+            result = {k: _as_requirements(requirements, "requirements") for k in keys}
+        elif given <= set(STAGES):
+            result = {k: _as_requirements(requirements.get(k), f"requirements['{k}']") for k in keys}
+        else:
+            raise ValueError(
+                f"Invalid keys in requirements: {sorted(map(str, given))}. Keys must either all be "
+                f"Requirements fields {sorted(fields)}, to apply to every stage, or all be stages "
+                f"{list(STAGES)}, to apply per stage. Mixing them is not allowed."
+            )
+    else:
+        raise TypeError(
+            f"Invalid type for requirements: {type(requirements)}. Must be Requirements or a dict of "
+            "its fields, or a dict of those keyed by stage."
+        )
+
+    for k, env in _split_environment(environment, keys).items():
+        _merge_requirements(result[k], Requirements(environment=env))
+
+    for req in result.values():
+        req.environment = _add_self_to_environment(req.environment)
+
+    return result
