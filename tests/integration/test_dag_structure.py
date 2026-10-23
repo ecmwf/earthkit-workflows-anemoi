@@ -63,12 +63,18 @@ class TestDAGStructure:
         assert action.nodes.coords[ENSEMBLE_DIMENSION_NAME].size == 3
 
     @fake_checkpoints
-    def test_single_member_has_ensemble_coord(self, simple_ckpt_path):
-        """A deterministic run should have the ensemble name as a scalar coordinate, not a dimension."""
+    def test_deterministic_run_has_no_ensemble_dimension(self, simple_ckpt_path):
+        """A deterministic run (no ensemble members) has neither a dimension nor a coordinate for the ensemble."""
         action = from_input(simple_ckpt_path, "dummy", date="2020-01-01", lead_time="1D")
-        # Single member: ensemble name appears as a scalar coordinate (value None),
-        # NOT as a dimension with size > 0
-        assert ENSEMBLE_DIMENSION_NAME in action.nodes.coords
+        assert ENSEMBLE_DIMENSION_NAME not in action.nodes.dims
+        assert ENSEMBLE_DIMENSION_NAME not in action.nodes.coords
+
+    @fake_checkpoints
+    def test_single_member_has_ensemble_dimension(self, simple_ckpt_path):
+        """An explicit single member (0 is the control) is a dimension of length 1."""
+        action = from_input(simple_ckpt_path, "dummy", date="2020-01-01", lead_time="1D", ensemble_members=0)
+        assert ENSEMBLE_DIMENSION_NAME in action.nodes.dims
+        assert action.nodes.coords[ENSEMBLE_DIMENSION_NAME].size == 1
 
     @fake_checkpoints
     def test_from_initial_conditions_builds_graph(self, simple_ckpt_path):

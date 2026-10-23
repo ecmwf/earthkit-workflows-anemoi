@@ -130,6 +130,31 @@ def test_from_config(mock_config, ckpt, ensemble_members, kwargs, shape):
     assert_shape(action, shape)
 
 
+@fake_checkpoints
+def test_no_members_is_deterministic_without_number_dimension(mock_config):
+    """No `ensemble_members` gives no `number` dimension on any path which fetches initial conditions."""
+    from earthkit.workflows.plugins.anemoi.fluent import get_initial_conditions
+
+    ckpt = (Path(__file__).parent / "checkpoints/simple.yaml").absolute()
+    kwargs = {"date": "2020-01-01", "lead_time": "1D"}
+    shape = {"step": 4, "param": 6, "date": 1}
+
+    actions = [
+        from_input(ckpt, "dummy", **kwargs),
+        Inference(ckpt, lead_time="1D").from_input("dummy", kwargs["date"]),
+        from_config(mock_config, **kwargs, checkpoint=str(ckpt), input="dummy"),
+        get_initial_conditions(ckpt, "dummy", kwargs["date"]),
+    ]
+    for action in actions:
+        assert ENSEMBLE_DIMENSION_NAME not in action.nodes.dims
+        assert ENSEMBLE_DIMENSION_NAME not in action.nodes.coords
+        for _, array in nodetree_arrays(action.nodes):
+            assert ENSEMBLE_DIMENSION_NAME not in array.dims
+            assert ENSEMBLE_DIMENSION_NAME not in array.coords
+    for action in actions[:3]:
+        assert_shape(action, shape)
+
+
 @pytest.mark.parametrize(
     "ckpt, ensemble_members, kwargs, shape",
     STANDARD_INFERENCE_TESTS,
