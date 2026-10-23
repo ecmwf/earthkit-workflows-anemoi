@@ -157,8 +157,8 @@ def _get_initial_conditions_source(
         Ensemble members to get. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         None is a deterministic run: the initial conditions are fetched with
-        `number=None` (the configured, e.g. oper analysis, request) and the
-        action has no `number` dimension. By default None.
+        stream oper, type fc, step 0 (as for member 0) and the action has no
+        `number` dimension. By default None.
     requirements : Requirements | None, optional
         Already normalised requirements of the initial conditions stage, applied to every node created here.
         Must not be shared with the caller, by default None
@@ -439,8 +439,9 @@ class Inference:
         ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
             Ensemble members to run. An int selects one member, a sequence
             (e.g. `range(1, 51)`) selects several; 0 is the control member.
-            None is a deterministic run (oper analysis initial conditions, no
-            `number` dimension, output written as stream oper, type fc), by default None
+            None is a deterministic run (initial conditions stream oper, type fc,
+            step 0, no `number` dimension, output written as stream oper, type fc),
+            by default None
         requirements : REQUIREMENTS | None, optional
             Execution requirements, by default None.
             Either a single `Requirements` (or a dict of its fields, `environment` and `needs_gpu`),
@@ -621,8 +622,9 @@ def from_config(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION , optional
         Ensemble members to run. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        None is a deterministic run (oper analysis initial conditions, no
-        `number` dimension, output written as stream oper, type fc), by default None
+        None is a deterministic run (initial conditions stream oper, type fc,
+        step 0, no `number` dimension, output written as stream oper, type fc),
+        by default None
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
@@ -739,8 +741,9 @@ def from_input(
     ensemble_members : ENSEMBLE_MEMBER_SPECIFICATION, optional
         Ensemble members to run. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
-        None is a deterministic run (oper analysis initial conditions, no
-        `number` dimension, output written as stream oper, type fc), by default None
+        None is a deterministic run (initial conditions stream oper, type fc,
+        step 0, no `number` dimension, output written as stream oper, type fc),
+        by default None
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the model in, by default None
@@ -930,8 +933,8 @@ def get_initial_conditions(
         Ensemble members to retrieve. An int selects one member, a sequence
         (e.g. `range(1, 51)`) selects several; 0 is the control member.
         By default, None, a deterministic run: the initial conditions are fetched
-        with `number=None` (oper analysis) and there is no `number` dimension.
-        Use 0 for the control member.
+        as stream oper, type fc, step 0 and there is no `number` dimension.
+        Member 0 is fetched the same way, members above 0 as stream enfo, type pf.
     environment : ENVIRONMENT, optional
         Deprecated, use `requirements`. Emits a `DeprecationWarning`.
         Environment to run the initial conditions retrieval in, by default None.

@@ -28,37 +28,42 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
-def _member_request(request: dict, number: int) -> dict:
+def _member_request(request: dict, number: int | None) -> dict:
     """Turn a MARS request into the initial-condition request of ensemble member ``number``.
 
-    Member 0 is the control forecast (``stream=enfo, type=cf``, never a ``number``), any other member is a
-    perturbed forecast (``stream=enfo, type=pf, number=<member>``). Both are the analysis time, ``step=0``.
+    No member (``None``) and member 0 use the HRES forecast at the analysis time (``stream=oper, type=fc``, never
+    a ``number``). Any other member is a perturbed forecast (``stream=enfo, type=pf, number=<member>``). Both are
+    ``step=0``. ``stream`` is always set, so that it wins over anemoi's rename of 06 and 18 UTC ``oper`` to ``scda``.
     """
     request = dict(request)
-    request["stream"] = "enfo"
     request["step"] = 0
-    if number == 0:
-        request["type"] = "cf"
+    if not number:
+        request["stream"] = "oper"
+        request["type"] = "fc"
         request.pop("number", None)
     else:
+        request["stream"] = "enfo"
         request["type"] = "pf"
         request["number"] = number
     return request
 
 
-def _use_ensemble_member(input_obj, number: int) -> None:
-    """Make a prognostic input retrieve the initial conditions of ensemble member ``number`` from ENS.
+def _use_ensemble_member(input_obj, number: int | None) -> None:
+    """Make a prognostic input retrieve the initial conditions of ensemble member ``number``.
+
+    ``None`` and 0 are ``stream=oper, type=fc, step=0``, ``n > 0`` is ``stream=enfo, type=pf, number=n, step=0``.
 
     Only the inputs of the (fresh, per call) runner are modified, nothing shared:
 
     - ``step`` is dropped from the configured request keywords, since anemoi would otherwise shift the dates by it
       while the member request is always ``step=0``.
     - The input's request patch is wrapped so that the member override is applied last. It therefore wins over
-      anything coming from the checkpoint, the input configuration (``stream``, ``type``, ``number``, ``step``)
-      and the configured ``patches``.
+      anything coming from the checkpoint, the input configuration (``stream``, ``type``, ``number``, ``step``),
+      the configured ``patches`` and the ``scda`` rename of 06 and 18 UTC.
 
-    ``MarsInput`` inside a ``Cutout`` (at any depth) are all switched. Any other input cannot take a member, so
-    it is left alone with a warning.
+    ``MarsInput`` (and its subclasses, such as the Open Data and Polytope inputs) inside a ``Cutout`` (at any
+    depth) are all switched. Any other input cannot take a member, so it is left alone, with a warning if a
+    member was requested.
     """
     from anemoi.inference.inputs.cutout import Cutout
     from anemoi.inference.inputs.empty import EmptyInput
@@ -75,7 +80,7 @@ def _use_ensemble_member(input_obj, number: int) -> None:
     elif isinstance(input_obj, Cutout):
         for source in input_obj.sources.values():
             _use_ensemble_member(source, number)
-    elif not isinstance(input_obj, EmptyInput):
+    elif number is not None and not isinstance(input_obj, EmptyInput):
         LOG.warning(
             f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
         )
@@ -84,9 +89,9 @@ def _use_ensemble_member(input_obj, number: int) -> None:
 def _get_initial_conditions(config: dict, date: DATE, number: int | None = None) -> dict[str, State]:
     """Get initial conditions for the model.
 
-    With an ensemble member ``number``, the prognostic initial conditions are the member's own ENS fields:
-    ``stream=enfo, type=cf, step=0`` for member 0 (no ``number``) and ``stream=enfo, type=pf, number=<number>,
-    step=0`` otherwise. Constant and dynamic forcings are not changed. With ``number=None`` nothing is changed.
+    The prognostic initial conditions are ``stream=oper, type=fc, step=0`` for no member (``None``) and member 0
+    (no ``number``), and ``stream=enfo, type=pf, number=<number>, step=0`` for members above 0. Constant and
+    dynamic forcings are not changed. The state is labelled with the member unless it is ``None``.
     """
     # The runner, and so every input, is created fresh in each call: the member override never leaks to other calls
     runner = CascadeRunner(**config)
@@ -98,8 +103,7 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
     for key in runner.dataset_names:
         dates = [to_datetime(date) + h for h in runner.checkpoint.multi_dataset_metadata[key].lagged]
 
-        if number is not None:
-            _use_ensemble_member(runner.prognostics_inputs[key], number)
+        _use_ensemble_member(runner.prognostics_inputs[key], number)
 
         states[key] = runner._combine_states(
             runner.prognostics_inputs[key].create_input_state(dates=dates),

@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 import earthkit.data as ekd
 import pytest
 import yaml
+from anemoi.inference.inputs import input_registry
 from anemoi.inference.inputs.cutout import Cutout
 from anemoi.inference.inputs.mars import MarsInput
 from anemoi.inference.testing import fake_checkpoints
@@ -60,6 +61,23 @@ def _category(request: dict) -> str:
     return PROGNOSTIC
 
 
+class FakeOpenDataInput(MarsInput):
+    """Stands in for the optional Open Data input plugin: same base class, same name and same request building.
+
+    As in the plugin, requests are ``type=fc`` and only the configured patches are applied (here through the real
+    ``MarsInput.patch``), the final retrieval being intercepted like the MARS one.
+    """
+
+    trace_name = "opendata"
+
+    def retrieve(self, variables, dates):
+        requests = self.metadata.mars_requests(variables=variables, dates=dates, use_grib_paramid=False, type="fc")
+        for request in requests:
+            request.update(self.kwargs)
+            ekd.from_source("mars", self.patch(self.patch_data_request(request)))
+        return ekd.from_source("empty")
+
+
 @fake_checkpoints
 def _retrieve(
     tmp_path: Path,
@@ -91,6 +109,7 @@ def _retrieve(
             source.create_input_state(dates=dates, **kwargs)
         return {"fields": {}}
 
+    monkeypatch.setitem(input_registry.factories, OPENDATA, FakeOpenDataInput)
     monkeypatch.setattr(ekd, "from_source", intercept)
     monkeypatch.setattr(MarsInput, "_create_input_state", lambda self, *args, **kwargs: {"fields": {}})
     monkeypatch.setattr(Cutout, "create_input_state", create_cutout_state)
@@ -137,34 +156,40 @@ def _assert_forcings_unchanged(requests: dict[str, list[dict]], **expected):
 
 
 MARS_INPUT = {"mars": {}}
+OPENDATA = "fake-opendata"
+OPENDATA_INPUT = {OPENDATA: {}}
 
 
 class TestMemberNone:
-    def test_requests_unchanged(self, retrieve):
+    def test_prognostics_are_oper_fc_step_0(self, retrieve):
         requests = _by_category(retrieve(MARS_INPUT, None))
         assert _times(requests[PROGNOSTIC]) == DATES
         for request in requests[PROGNOSTIC]:
-            assert request["stream"] == "oper"
-            assert request["type"] == "an"
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
             assert "number" not in request
-            assert "step" not in request
         _assert_forcings_unchanged(requests)
 
-    def test_configured_ens_request_kept(self, retrieve):
-        config = {"mars": {"stream": "enfo", "type": "pf", "number": 5, "step": 0}}
-        for request in _by_category(retrieve(config, None))[PROGNOSTIC]:
-            assert (request["stream"], request["type"], request["number"], request["step"]) == ("enfo", "pf", 5, 0)
+    def test_configured_ens_request_is_overridden(self, retrieve):
+        config = {"mars": {"stream": "enfo", "type": "pf", "number": 5, "step": 6}}
+        requests = _by_category(retrieve(config, None))
+        assert _times(requests[PROGNOSTIC]) == DATES
+        for request in requests[PROGNOSTIC]:
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+            assert "number" not in request
+
+    def test_matches_the_control_member(self, retrieve):
+        assert retrieve(MARS_INPUT, None) == retrieve(MARS_INPUT, 0)
 
 
 class TestControlMember:
-    def test_prognostics_are_enfo_cf_step_0(self, retrieve):
+    def test_prognostics_are_oper_fc_step_0(self, retrieve):
         requests = _by_category(retrieve(MARS_INPUT, 0))
         assert _times(requests[PROGNOSTIC]) == DATES
         for request in requests[PROGNOSTIC]:
             assert request == {
                 "class": "od",
-                "stream": "enfo",
-                "type": "cf",
+                "stream": "oper",
+                "type": "fc",
                 "expver": "0001",
                 "levtype": "sfc",
                 "param": ["10u", "10v", "2t", "msl"],
@@ -175,15 +200,31 @@ class TestControlMember:
             }
         _assert_forcings_unchanged(requests)
 
+    @pytest.mark.parametrize("number", [None, 0])
     @pytest.mark.parametrize("where", ["checkpoint", "input config", "both"])
-    def test_number_is_removed(self, retrieve, where):
+    def test_number_is_removed(self, retrieve, where, number):
         checkpoint_mars = {**ANALYSIS, "number": 7} if where != "input config" else ANALYSIS
         input_config = {"mars": {"number": 9} if where != "checkpoint" else {}}
-        requests = _by_category(retrieve(input_config, 0, checkpoint_mars))
+        requests = _by_category(retrieve(input_config, number, checkpoint_mars))
         assert requests[PROGNOSTIC]
         for request in requests[PROGNOSTIC]:
             assert "number" not in request
-            assert (request["stream"], request["type"], request["step"]) == ("enfo", "cf", 0)
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+
+    @pytest.mark.parametrize("number", [None, 0])
+    def test_18_utc_is_oper_never_scda(self, retrieve, number):
+        # With an oper/fc checkpoint request, anemoi renames the 18 UTC stream to scda before the patches: the
+        # member override must win over it
+        requests = _by_category(retrieve(MARS_INPUT, number, {**ANALYSIS, "type": "fc"}))
+        assert _times(requests[PROGNOSTIC]) == DATES
+        assert ("2019-12-31", "1800") in _times(requests[PROGNOSTIC])
+        for request in requests[PROGNOSTIC]:
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+
+    def test_18_utc_rename_is_what_the_override_wins_over(self, retrieve, monkeypatch):
+        monkeypatch.setattr(inference, "_member_request", lambda request, number: request)
+        requests = _by_category(retrieve(MARS_INPUT, 0, {**ANALYSIS, "type": "fc"}))
+        assert {r["stream"] for r in requests[PROGNOSTIC] if r["time"] == "1800"} == {"scda"}
 
 
 class TestPerturbedMember:
@@ -214,36 +255,31 @@ class TestPerturbedMember:
 
 
 class TestOverrides:
-    @pytest.mark.parametrize("number, type_", [(0, "cf"), (3, "pf")])
-    def test_wins_over_configured_stream_and_type(self, retrieve, number, type_):
-        config = {"mars": {"stream": "oper", "type": "fc", "class": "ai", "expver": "0002", "grid": [1, 1]}}
+    @pytest.mark.parametrize("number, stream, type_", [(None, "oper", "fc"), (0, "oper", "fc"), (3, "enfo", "pf")])
+    def test_wins_over_configured_stream_and_type(self, retrieve, number, stream, type_):
+        config = {"mars": {"stream": "enfo", "type": "cf", "class": "ai", "expver": "0002", "grid": [1, 1]}}
         requests = _by_category(retrieve(config, number, {**ANALYSIS, "stream": "scda", "type": "4v"}))
         for request in requests[PROGNOSTIC]:
-            assert (request["stream"], request["type"], request["step"]) == ("enfo", type_, 0)
+            assert (request["stream"], request["type"], request["step"]) == (stream, type_, 0)
             # What is not part of the member selection is kept as configured
             assert request["class"] == "ai"
             assert request["expver"] == "0002"
             assert request["grid"] == [1, 1]
         for request in requests[CONSTANT] + requests[DYNAMIC]:
-            assert (request["stream"], request["type"]) == ("oper", "fc")
+            assert (request["stream"], request["type"]) == ("enfo", "cf")
 
-    @pytest.mark.parametrize("number, type_", [(0, "cf"), (3, "pf")])
+    @pytest.mark.parametrize("number, type_", [(None, "fc"), (0, "fc"), (3, "pf")])
     def test_configured_step_does_not_shift_dates(self, retrieve, number, type_):
         config = {"mars": {"type": "fc", "step": 6}}
         requests = _by_category(retrieve(config, number))
-        # Without a member, anemoi shifts the dates back by the configured step: the request is for the run
-        # that is 6 hours older. With a member the step is 0 and the dates are the initial conditions' dates.
+        # anemoi would shift the dates back by the configured step (the run that is 6 hours older). The step is
+        # always 0, so the dates are the initial conditions' dates.
         assert _times(requests[PROGNOSTIC]) == DATES
         assert {r["step"] for r in requests[PROGNOSTIC]} == {0}
         assert {r["type"] for r in requests[PROGNOSTIC]} == {type_}
 
-    def test_configured_step_is_kept_without_member(self, retrieve):
-        requests = _by_category(retrieve({"mars": {"type": "fc", "step": 6}}, None))
-        assert _times(requests[PROGNOSTIC]) == [("2019-12-31", "1200"), ("2019-12-31", "1800")]
-        assert {r["step"] for r in requests[PROGNOSTIC]} == {6}
-
-    @pytest.mark.parametrize("number, type_", [(0, "cf"), (3, "pf")])
-    def test_applied_after_configured_patches(self, retrieve, number, type_):
+    @pytest.mark.parametrize("number, stream, type_", [(None, "oper", "fc"), (0, "oper", "fc"), (3, "enfo", "pf")])
+    def test_applied_after_configured_patches(self, retrieve, number, stream, type_):
         # Patches matching both the original and the ENS request: the member override must still win
         patches = [
             [{"param": ["10u", "10v", "2t", "msl"]}, {"stream": "oper", "type": "an", "number": 11, "step": 6}],
@@ -252,8 +288,8 @@ class TestOverrides:
         config = {"mars": {"patches": patches}}
         requests = _by_category(retrieve(config, number))
         for request in requests[PROGNOSTIC]:
-            assert (request["stream"], request["type"], request["step"]) == ("enfo", type_, 0)
-            assert request.get("number") == (None if number == 0 else number)
+            assert (request["stream"], request["type"], request["step"]) == (stream, type_, 0)
+            assert request.get("number") == (number or None)
             # A patch which only matches the original request is applied
             assert request["expver"] == "0003"
 
@@ -268,9 +304,9 @@ class TestOverrides:
         second = _by_category(retrieve(MARS_INPUT, None))
         third = _by_category(retrieve(MARS_INPUT, 0))
         assert {(r["stream"], r["type"]) for r in first[PROGNOSTIC]} == {("enfo", "pf")}
-        assert {(r["stream"], r["type"]) for r in second[PROGNOSTIC]} == {("oper", "an")}
-        assert all("number" not in r and "step" not in r for r in second[PROGNOSTIC])
-        assert {(r["stream"], r["type"]) for r in third[PROGNOSTIC]} == {("enfo", "cf")}
+        assert {(r["stream"], r["type"]) for r in second[PROGNOSTIC]} == {("oper", "fc")}
+        assert all("number" not in r for r in second[PROGNOSTIC])
+        assert {(r["stream"], r["type"]) for r in third[PROGNOSTIC]} == {("oper", "fc")}
 
     def test_shared_config_is_not_mutated(self, tmp_path, monkeypatch):
         mars = {"step": 0, "type": "fc", "number": 9, "patches": [[{"stream": "oper"}, {"type": "fc"}]]}
@@ -285,8 +321,8 @@ class TestCutout:
     def _cutout(*sources: tuple[str, dict]) -> dict:
         return {"cutout": {"sources": [{name: {"mars": cfg, "mask": None}} for name, cfg in sources]}}
 
-    @pytest.mark.parametrize("number, type_", [(0, "cf"), (3, "pf")])
-    def test_every_source_gets_the_member(self, retrieve, number, type_):
+    @pytest.mark.parametrize("number, stream, type_", [(None, "oper", "fc"), (0, "oper", "fc"), (3, "enfo", "pf")])
+    def test_every_source_gets_the_member(self, retrieve, number, stream, type_):
         config = self._cutout(
             ("lam", {"expver": "0010", "stream": "oper", "type": "fc", "number": 9}),
             ("global", {"expver": "0020", "step": 6, "type": "fc"}),
@@ -297,8 +333,8 @@ class TestCutout:
         assert sorted({r["expver"] for r in prognostics}) == ["0010", "0020", "0030"]
         assert len(prognostics) == 3 * len(DATES)
         for request in prognostics:
-            assert (request["stream"], request["type"], request["step"]) == ("enfo", type_, 0)
-            assert request.get("number") == (None if number == 0 else number)
+            assert (request["stream"], request["type"], request["step"]) == (stream, type_, 0)
+            assert request.get("number") == (number or None)
         assert {r["date"] + r["time"] for r in prognostics} == {d + t for d, t in DATES}
 
     def test_nested_cutout(self, retrieve):
@@ -319,22 +355,77 @@ class TestCutout:
         prognostics = [r for r in requests if _category(r) == PROGNOSTIC]
         assert sorted({r["expver"] for r in prognostics}) == ["0010", "0020"]
         for request in prognostics:
-            assert (request["stream"], request["type"], request["step"]) == ("enfo", "cf", 0)
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
             assert "number" not in request
-
-    def test_member_none_unchanged(self, retrieve):
-        config = self._cutout(("lam", {"expver": "0010"}), ("global", {"expver": "0020"}))
-        prognostics = [r for r in retrieve(config, None) if _category(r) == PROGNOSTIC]
-        assert len(prognostics) == 2 * len(DATES)
-        for request in prognostics:
-            assert (request["stream"], request["type"]) == ("oper", "an")
-            assert "number" not in request and "step" not in request
 
     def test_forcings_unchanged(self, retrieve):
         config = self._cutout(("lam", {"expver": "0010"}), ("global", {"expver": "0020"}))
         requests = _by_category(retrieve(config, 3))
         _assert_forcings_unchanged(requests)
         assert {r["expver"] for r in requests[CONSTANT]} == {"0010", "0020"}
+
+
+class TestOpenData:
+    """Subclasses of the MARS input (here standing for Open Data) follow the same rule as MARS."""
+
+    @pytest.mark.parametrize("number", [None, 0])
+    def test_control_and_no_member_are_oper_fc_step_0(self, retrieve, number):
+        requests = _by_category(retrieve(OPENDATA_INPUT, number))
+        assert _times(requests[PROGNOSTIC]) == DATES
+        for request in requests[PROGNOSTIC]:
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+            assert "number" not in request
+        _assert_forcings_unchanged_fc(requests)
+
+    @pytest.mark.parametrize("number", [None, 0])
+    def test_configured_request_is_overridden(self, retrieve, number):
+        config = {OPENDATA: {"expver": "0005", "stream": "scda", "number": 4, "step": 6}}
+        for request in _by_category(retrieve(config, number))[PROGNOSTIC]:
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+            assert "number" not in request
+            assert request["expver"] == "0005"
+
+    def test_perturbed_member_is_enfo_pf(self, retrieve):
+        requests = _by_category(retrieve(OPENDATA_INPUT, 3))
+        assert _times(requests[PROGNOSTIC]) == DATES
+        for request in requests[PROGNOSTIC]:
+            assert (request["stream"], request["type"], request["number"], request["step"]) == ("enfo", "pf", 3, 0)
+        _assert_forcings_unchanged_fc(requests)
+
+    @staticmethod
+    def _cutout(opendata: dict) -> dict:
+        return {
+            "cutout": {
+                "sources": [
+                    {"lam": {"mars": {"expver": "0010"}, "mask": None}},
+                    {"global": {OPENDATA: opendata, "mask": None}},
+                ]
+            }
+        }
+
+    @pytest.mark.parametrize("number", [None, 0])
+    def test_cutout_control_changes_every_source(self, retrieve, number):
+        prognostics = [r for r in retrieve(self._cutout({"expver": "0020"}), number) if _category(r) == PROGNOSTIC]
+        assert len(prognostics) == 2 * len(DATES)
+        assert sorted({r["expver"] for r in prognostics}) == ["0010", "0020"]
+        for request in prognostics:
+            assert (request["stream"], request["type"], request["step"]) == ("oper", "fc", 0)
+            assert "number" not in request
+
+    def test_cutout_perturbed_member_changes_every_source(self, retrieve):
+        prognostics = [r for r in retrieve(self._cutout({"expver": "0020"}), 3) if _category(r) == PROGNOSTIC]
+        assert sorted({r["expver"] for r in prognostics}) == ["0010", "0020"]
+        for request in prognostics:
+            assert (request["stream"], request["type"], request["number"]) == ("enfo", "pf", 3)
+
+
+def _assert_forcings_unchanged_fc(requests: dict[str, list[dict]]):
+    """The Open Data input builds ``type=fc`` requests for forcings too, and no member touches them."""
+    for category in (CONSTANT, DYNAMIC):
+        assert requests[category], category
+        for request in requests[category]:
+            assert (request["stream"], request["type"]) == ("oper", "fc")
+            assert "number" not in request
 
 
 class TestNonMarsInput:
