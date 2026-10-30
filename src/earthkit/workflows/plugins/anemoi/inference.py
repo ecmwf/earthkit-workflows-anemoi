@@ -28,43 +28,87 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
-def _get_initial_conditions(config: dict, date: DATE, number: int | None = None) -> dict[str, State]:
-    """Get initial conditions for the model"""
-    runner = CascadeRunner(**config)
+def _member_request(request: dict, number: int | None) -> dict:
+    """Turn a MARS request into the initial-condition request of ensemble member ``number``.
 
-    states = {}
+    No member (``None``) and member 0 use the HRES forecast at the analysis time (``stream=oper, type=fc``, never
+    a ``number``). Any other member is a perturbed forecast (``stream=enfo, type=pf, number=<member>``). Both are
+    ``step=0``. ``stream`` is always set, so that it wins over anemoi's rename of 06 and 18 UTC ``oper`` to ``scda``.
+    """
+    request = dict(request)
+    request["step"] = 0
+    if not number:
+        request["stream"] = "oper"
+        request["type"] = "fc"
+        request.pop("number", None)
+    else:
+        request["stream"] = "enfo"
+        request["type"] = "pf"
+        request["number"] = number
+    return request
+
+
+def _use_ensemble_member(input_obj, number: int | None) -> None:
+    """Make a prognostic input retrieve the initial conditions of ensemble member ``number``.
+
+    ``None`` and 0 are ``stream=oper, type=fc, step=0``, ``n > 0`` is ``stream=enfo, type=pf, number=n, step=0``.
+
+    Only the inputs of the (fresh, per call) runner are modified, nothing shared:
+
+    - ``step`` is dropped from the configured request keywords, since anemoi would otherwise shift the dates by it
+      while the member request is always ``step=0``.
+    - The input's request patch is wrapped so that the member override is applied last. It therefore wins over
+      anything coming from the checkpoint, the input configuration (``stream``, ``type``, ``number``, ``step``),
+      the configured ``patches`` and the ``scda`` rename of 06 and 18 UTC.
+
+    ``MarsInput`` (and its subclasses, such as the Open Data and Polytope inputs) inside a ``Cutout`` (at any
+    depth) are all switched. Any other input cannot take a member, so it is left alone, with a warning if a
+    member was requested.
+    """
     from anemoi.inference.inputs.cutout import Cutout
     from anemoi.inference.inputs.empty import EmptyInput
     from anemoi.inference.inputs.mars import MarsInput
 
+    if isinstance(input_obj, MarsInput):
+        configured_patch = input_obj.patch
+
+        def patch(request: dict) -> dict:
+            return _member_request(configured_patch(request), number)
+
+        input_obj.kwargs = {k: v for k, v in input_obj.kwargs.items() if k != "step"}
+        input_obj.patch = patch  # type: ignore[method-assign]
+    elif isinstance(input_obj, Cutout):
+        for source in input_obj.sources.values():
+            _use_ensemble_member(source, number)
+    elif number is not None and not isinstance(input_obj, EmptyInput):
+        LOG.warning(
+            f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
+        )
+
+
+def _get_initial_conditions(config: dict, date: DATE, number: int | None = None) -> dict[str, State]:
+    """Get initial conditions for the model.
+
+    The prognostic initial conditions are ``stream=oper, type=fc, step=0`` for no member (``None``) and member 0
+    (no ``number``), and ``stream=enfo, type=pf, number=<number>, step=0`` for members above 0. Constant and
+    dynamic forcings are not changed. The state is labelled with the member unless it is ``None``.
+    """
+    # The runner, and so every input, is created fresh in each call: the member override never leaks to other calls
+    runner = CascadeRunner(**config)
+
+    states = {}
+
     # TODO: Replace with a prefetch of all data in the case of dynamics and model uses GribInput during run
     # Use pipes to read and write
-    def _mars_kwargs(input_obj):
-        if isinstance(input_obj, MarsInput) and number is not None:
-            return {"number": number}
-        elif isinstance(input_obj, EmptyInput):
-            return {}
-        elif isinstance(input_obj, Cutout):
-            return list(_mars_kwargs(x) for x in input_obj.sources.values())[0]
-        elif number is not None:
-            LOG.warning(
-                f"Ensemble member specification provided but input {input_obj} is not a MarsInput, unable to apply ensemble member specification"
-            )
-        return {}
-
     for key in runner.dataset_names:
         dates = [to_datetime(date) + h for h in runner.checkpoint.multi_dataset_metadata[key].lagged]
 
+        _use_ensemble_member(runner.prognostics_inputs[key], number)
+
         states[key] = runner._combine_states(
-            runner.prognostics_inputs[key].create_input_state(
-                dates=dates, **_mars_kwargs(runner.prognostics_inputs[key])
-            ),
-            runner.constant_forcings_inputs[key].create_input_state(
-                dates=dates, **_mars_kwargs(runner.constant_forcings_inputs[key])
-            ),
-            runner.dynamic_forcings_inputs[key].create_input_state(
-                dates=dates, **_mars_kwargs(runner.dynamic_forcings_inputs[key])
-            ),
+            runner.prognostics_inputs[key].create_input_state(dates=dates),
+            runner.constant_forcings_inputs[key].create_input_state(dates=dates),
+            runner.dynamic_forcings_inputs[key].create_input_state(dates=dates),
         )
         if number is not None:
             states[key][ENSEMBLE_DIMENSION_NAME] = number
