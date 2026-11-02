@@ -29,6 +29,18 @@ from earthkit.workflows.plugins.anemoi.fluent import (
 )
 from earthkit.workflows.plugins.anemoi.types import ENSEMBLE_DIMENSION_NAME
 
+
+@pytest.fixture(autouse=True)
+def development_version(monkeypatch):
+    """Use a development version, which does not add itself to the environment.
+
+    A release version (eg. when testing a release tag) adds `earthkit-workflows-anemoi~=x.y.z` to every
+    environment, which the exact environment checks below do not expect. Tests of that behaviour set
+    a release version themselves.
+    """
+    monkeypatch.setattr("earthkit.workflows.plugins.anemoi.__version__", "0.0.0.dev0")
+
+
 STANDARD_INFERENCE_TESTS = [
     # Test inputs of ensembles
     [
