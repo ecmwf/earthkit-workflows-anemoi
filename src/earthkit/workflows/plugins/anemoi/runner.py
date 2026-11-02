@@ -142,7 +142,18 @@ class CascadeRunner(Runner):
             Path to the model checkpoint.
         **kwargs : Any
             Additional keyword arguments passed to the `RunConfiguration`.
+            The runner always uses the cascade output, so `output` (which is in the dump of a
+            `RunConfiguration`) is ignored, with a warning unless it is the default or the cascade output.
         """
+        output = kwargs.pop("output", None)
+        if not (
+            output is None
+            or output == RunConfiguration.model_fields["output"].default
+            or output == "cascade"
+            or (isinstance(output, dict) and list(output) == ["cascade"])
+        ):
+            LOG.warning("The output option %r is ignored: CascadeRunner always uses the cascade output.", output)
+
         config = RunConfiguration(
             checkpoint=checkpoint,
             output="cascade",
