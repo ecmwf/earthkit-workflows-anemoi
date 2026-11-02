@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.10.0...0.10.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* Apply the run configuration env in CascadeRunner ([#60](https://github.com/ecmwf/earthkit-workflows-anemoi/issues/60)) ([1da0305](https://github.com/ecmwf/earthkit-workflows-anemoi/commit/1da030534416ab5c29d09e5b9e4c0e324a71ede3))
+* Ignore the output option passed to CascadeRunner ([#61](https://github.com/ecmwf/earthkit-workflows-anemoi/issues/61)) ([bfa1919](https://github.com/ecmwf/earthkit-workflows-anemoi/commit/bfa19193c7e6ea00243a6631506fb4795c931279))
+
 ## [0.10.0](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.9.1...0.10.0) (2026-10-30)
 
 
