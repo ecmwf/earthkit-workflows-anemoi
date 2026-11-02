@@ -14,6 +14,7 @@ Custom Cascade Runner
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Generator
 from datetime import datetime
 from io import BytesIO
@@ -147,6 +148,10 @@ class CascadeRunner(Runner):
             output="cascade",
             **kwargs,
         )
+        # anemoi-inference only exports `env` to os.environ in `Configuration.load`,
+        # which is bypassed here, so apply it before the runner is set up.
+        for key, value in config.env.items():
+            os.environ[str(key)] = str(value)
         super().__init__(config)
 
     def run(  # type: ignore[reportIncompatibleMethodOverride]

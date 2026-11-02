@@ -7,7 +7,30 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from earthkit.workflows.plugins.anemoi.runner import _grib_metadata
+import os
+
+from anemoi.inference.runner import Runner
+
+from earthkit.workflows.plugins.anemoi.runner import CascadeRunner, _grib_metadata
+
+
+def test_cascade_runner_applies_env_before_runner_setup(monkeypatch, tmp_path):
+    # Register the variable with monkeypatch so it is restored on teardown
+    monkeypatch.setenv("ANEMOI_INFERENCE_NUM_CHUNKS", "unset")
+    monkeypatch.delenv("ANEMOI_INFERENCE_NUM_CHUNKS")
+
+    seen = {}
+
+    def fake_init(self, config):
+        # The environment must already be set when the base runner is set up
+        seen["value"] = os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS")
+
+    monkeypatch.setattr(Runner, "__init__", fake_init)
+
+    CascadeRunner(checkpoint=str(tmp_path / "dummy.ckpt"), env={"ANEMOI_INFERENCE_NUM_CHUNKS": 16})
+
+    assert seen["value"] == "16"
+    assert os.environ["ANEMOI_INFERENCE_NUM_CHUNKS"] == "16"
 
 
 def test_grib_metadata_no_member():
