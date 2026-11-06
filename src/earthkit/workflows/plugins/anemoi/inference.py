@@ -113,6 +113,9 @@ def _get_initial_conditions(config: dict, date: DATE, number: int | None = None)
         if number is not None:
             states[key][ENSEMBLE_DIMENSION_NAME] = number
         states[key].pop("_grib_templates_for_output", None)
+        # The input objects and typed variables may hold filters which cannot be unpickled in the next task
+        states[key].pop("_input", None)
+        states[key].pop("_variables", None)
     return states
 
 
