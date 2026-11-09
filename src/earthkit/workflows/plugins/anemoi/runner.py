@@ -63,11 +63,15 @@ def _grib_metadata(ensemble_member: int | None) -> dict:
 class CascadeOutput(Output):
     """Custom output class for the CascadeRunner that converts model states to GRIB format and then to earthkit FieldList."""
 
-    def __init__(self, runner: CascadeRunner, metadata: Metadata):
+    def __init__(
+        self, runner: CascadeRunner, metadata: Metadata, templates: list | None = None, modifiers: list | None = None
+    ):
         super().__init__(runner, metadata)
+        self._modifiers = modifiers
 
         mir_templates_available = template_provider_registry.is_registered("mir")
-        self._templates = (["mir"] if mir_templates_available else []) + ["builtin"]
+        # Configured templates are tried first, then the default providers
+        self._templates = list(templates or []) + (["mir"] if mir_templates_available else []) + ["builtin"]
 
     def write_step(self, state: dict) -> ekd.SimpleFieldList:  # type: ignore[reportIncompatibleMethodOverride]
         initial_date: datetime = state["date"]
@@ -81,6 +85,7 @@ class CascadeOutput(Output):
                 self.metadata,
                 out=grib_memory,
                 templates=self._templates,
+                modifiers=self._modifiers,
                 encoding=grib_metadata,
                 check_encoding=False,
             )
@@ -128,18 +133,30 @@ class CascadeOutput(Output):
         return ekd.SimpleFieldList.from_fields(fields)
 
 
+def _cascade_output_config(templates: list | None, modifiers: list | None) -> str | dict:
+    """Output configuration of the cascade output, with the given templates and modifiers if any."""
+    options = {key: value for key, value in (("templates", templates), ("modifiers", modifiers)) if value}
+    return {"cascade": options} if options else "cascade"
+
+
 class CascadeRunner(Runner):
     """Cascade Inference Runner"""
 
     outputs: dict[str, CascadeOutput]  # type: ignore[reportIncompatibleVariableOverride]
 
-    def __init__(self, checkpoint: str, **kwargs):
+    def __init__(
+        self, checkpoint: str, output_templates: list | None = None, output_modifiers: list | None = None, **kwargs
+    ):
         """Initialise the CascadeRunner.
 
         Parameters
         ----------
         checkpoint : str
             Path to the model checkpoint.
+        output_templates : list, optional
+            GRIB template providers for the output, tried before the default ones.
+        output_modifiers : list, optional
+            GRIB modifiers for the output, such as patches of the encoded keys per variable.
         **kwargs : Any
             Additional keyword arguments passed to the `RunConfiguration`.
             The runner always uses the cascade output, so `output` (which is in the dump of a
@@ -156,7 +173,7 @@ class CascadeRunner(Runner):
 
         config = RunConfiguration(
             checkpoint=checkpoint,
-            output="cascade",
+            output=_cascade_output_config(output_templates, output_modifiers),
             **kwargs,
         )
         # anemoi-inference only exports `env` to os.environ in `Configuration.load`,
