@@ -28,21 +28,28 @@ if TYPE_CHECKING:
 LOG = logging.getLogger(__name__)
 
 
+WAVE_STREAMS = frozenset({"wave", "scwv", "waef"})
+"""Streams of the wave model, whose fields are not in the atmospheric streams."""
+
+
 def _member_request(request: dict, number: int | None) -> dict:
     """Turn a MARS request into the initial-condition request of ensemble member ``number``.
 
-    No member (``None``) and member 0 use the HRES forecast at the analysis time (``stream=oper, type=fc``, never
+    No member (``None``) and member 0 use the control forecast at the analysis time (``stream=oper, type=fc``, never
     a ``number``). Any other member is a perturbed forecast (``stream=enfo, type=pf, number=<member>``). Both are
     ``step=0``. ``stream`` is always set, so that it wins over anemoi's rename of 06 and 18 UTC ``oper`` to ``scda``.
+    A request for the wave model (a ``stream`` in ``WAVE_STREAMS``) uses its streams instead: ``wave`` for no member
+    and member 0, ``waef`` for the other members.
     """
     request = dict(request)
+    wave = request.get("stream") in WAVE_STREAMS
     request["step"] = 0
     if not number:
-        request["stream"] = "oper"
+        request["stream"] = "wave" if wave else "oper"
         request["type"] = "fc"
         request.pop("number", None)
     else:
-        request["stream"] = "enfo"
+        request["stream"] = "waef" if wave else "enfo"
         request["type"] = "pf"
         request["number"] = number
     return request
