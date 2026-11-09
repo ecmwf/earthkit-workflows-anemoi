@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.10.2...0.10.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* Keep wave requests in the wave streams for initial conditions ([#66](https://github.com/ecmwf/earthkit-workflows-anemoi/issues/66)) ([c5c1932](https://github.com/ecmwf/earthkit-workflows-anemoi/commit/c5c19320b8676d3e8527d630a37bab11242b759d))
+
 ## [0.10.2](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.10.1...0.10.2) (2026-11-09)
 
 
