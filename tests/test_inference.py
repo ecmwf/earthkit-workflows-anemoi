@@ -254,6 +254,24 @@ class TestPerturbedMember:
         assert {r["number"] for r in requests[CONSTANT] + requests[DYNAMIC]} == {9}
 
 
+class TestWaveStreams:
+    @pytest.mark.parametrize("configured", ["wave", "scwv", "waef"])
+    @pytest.mark.parametrize("number, stream, type_", [(None, "wave", "fc"), (0, "wave", "fc"), (3, "waef", "pf")])
+    def test_wave_requests_stay_in_the_wave_streams(self, configured, number, stream, type_):
+        request = inference._member_request({"stream": configured, "param": ["swh", "mwp"], "step": 6}, number)
+        assert (request["stream"], request["type"], request["step"]) == (stream, type_, 0)
+        assert request.get("number") == (number or None)
+
+    @pytest.mark.parametrize("configured", ["oper", "scda", "enfo"])
+    @pytest.mark.parametrize("number, stream", [(None, "oper"), (0, "oper"), (3, "enfo")])
+    def test_atmospheric_requests_use_the_atmospheric_streams(self, configured, number, stream):
+        request = inference._member_request({"stream": configured, "param": ["2t"]}, number)
+        assert request["stream"] == stream
+
+    def test_request_without_stream_uses_the_atmospheric_streams(self):
+        assert inference._member_request({"param": ["lsm"]}, None)["stream"] == "oper"
+
+
 class TestOverrides:
     @pytest.mark.parametrize("number, stream, type_", [(None, "oper", "fc"), (0, "oper", "fc"), (3, "enfo", "pf")])
     def test_wins_over_configured_stream_and_type(self, retrieve, number, stream, type_):
