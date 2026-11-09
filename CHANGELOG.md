@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.10.1...0.10.2) (2026-11-09)
+
+
+### Features
+
+* Configure GRIB output templates and modifiers of CascadeRunner ([#64](https://github.com/ecmwf/earthkit-workflows-anemoi/issues/64)) ([b3b22c7](https://github.com/ecmwf/earthkit-workflows-anemoi/commit/b3b22c740da328dfb4e2c5317029abd399767e13))
+
 ## [0.10.1](https://github.com/ecmwf/earthkit-workflows-anemoi/compare/0.10.0...0.10.1) (2026-11-02)
 
 
